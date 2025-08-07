@@ -1,3 +1,4 @@
+use crate::chat_template::ChatTemplateEngine;
 use crate::model::ModelManager;
 use crate::types::{
     FinishReason, GenerationRequest, GenerationResponse, MessageRole, QueueConfig, QueueError,
@@ -121,6 +122,7 @@ pub struct RequestQueue {
     worker_handles: Vec<JoinHandle<()>>,
     config: QueueConfig,
     metrics: Arc<QueueMetrics>,
+    chat_template: Arc<ChatTemplateEngine>,
 }
 
 impl RequestQueue {
@@ -128,6 +130,7 @@ impl RequestQueue {
         let (sender, receiver) = mpsc::channel(config.max_queue_size);
         let receiver = Arc::new(Mutex::new(receiver));
         let metrics = Arc::new(QueueMetrics::new());
+        let chat_template = Arc::new(ChatTemplateEngine::new());
 
         let mut worker_handles = Vec::new();
 
@@ -137,9 +140,10 @@ impl RequestQueue {
             let model_manager = model_manager.clone();
             let config = config.clone();
             let metrics = metrics.clone();
+            let chat_template = chat_template.clone();
 
             let handle = tokio::spawn(async move {
-                Self::worker_loop(worker_id, receiver, model_manager, config, metrics).await;
+                Self::worker_loop(worker_id, receiver, model_manager, config, metrics, chat_template).await;
             });
 
             worker_handles.push(handle);
@@ -155,6 +159,7 @@ impl RequestQueue {
             worker_handles,
             config,
             metrics,
+            chat_template,
         }
     }
 
@@ -250,6 +255,7 @@ impl RequestQueue {
         model_manager: Arc<ModelManager>,
         config: QueueConfig,
         metrics: Arc<QueueMetrics>,
+        chat_template: Arc<ChatTemplateEngine>,
     ) {
         info!("Worker {} started", worker_id);
 
@@ -305,6 +311,7 @@ impl RequestQueue {
                 queued_request,
                 model_manager.clone(),
                 metrics.clone(),
+                chat_template.clone(),
             )
             .await;
         }
@@ -315,6 +322,7 @@ impl RequestQueue {
         queued_request: QueuedRequest,
         model_manager: Arc<ModelManager>,
         metrics: Arc<QueueMetrics>,
+        chat_template: Arc<ChatTemplateEngine>,
     ) {
         let start_time = Instant::now();
 
@@ -346,6 +354,7 @@ impl RequestQueue {
                         &model_manager,
                         stream_sender.clone(),
                         &queued_request.cancellation_token,
+                        &chat_template,
                     )
                 })
                 .await;
@@ -376,6 +385,7 @@ impl RequestQueue {
                         model,
                         &model_manager,
                         &queued_request.cancellation_token,
+                        &chat_template,
                     )
                 })
                 .await;
@@ -421,6 +431,7 @@ impl RequestQueue {
         model: &LlamaModel,
         model_manager: &ModelManager,
         cancellation_token: &CancellationToken,
+        chat_template: &ChatTemplateEngine,
     ) -> Result<GenerationResponse, QueueError> {
         let start_time = Instant::now();
 
@@ -553,18 +564,46 @@ impl RequestQueue {
             n_cur += 1;
         }
 
+        // Check if the generated text contains tool calls
+        let final_finish_reason = if finish_reason == FinishReason::EndOfSequence 
+            || finish_reason == FinishReason::StopToken
+            || finish_reason == FinishReason::MaxTokens {
+            match chat_template.extract_tool_calls(&generated_text) {
+                Ok(tool_calls) if !tool_calls.is_empty() => {
+                    debug!(
+                        "Worker {} detected {} tool calls in generated text for request {}",
+                        worker_id, tool_calls.len(), request_id
+                    );
+                    FinishReason::ToolCall
+                }
+                Ok(_) => {
+                    debug!("Worker {} no tool calls detected in generated text for request {}", worker_id, request_id);
+                    finish_reason
+                }
+                Err(e) => {
+                    warn!(
+                        "Worker {} failed to extract tool calls for request {}: {}",
+                        worker_id, request_id, e
+                    );
+                    finish_reason
+                }
+            }
+        } else {
+            finish_reason
+        };
+
         let generation_time = start_time.elapsed();
 
         debug!(
-            "Worker {} completed batch inference for request {} in {:?} ({} tokens)",
-            worker_id, request_id, generation_time, tokens_generated
+            "Worker {} completed batch inference for request {} in {:?} ({} tokens, finish_reason: {:?})",
+            worker_id, request_id, generation_time, tokens_generated, final_finish_reason
         );
 
         Ok(GenerationResponse {
             generated_text,
             tokens_generated,
             generation_time,
-            finish_reason,
+            finish_reason: final_finish_reason,
         })
     }
 
@@ -615,6 +654,7 @@ impl RequestQueue {
         model_manager: &ModelManager,
         stream_sender: mpsc::Sender<Result<StreamChunk, QueueError>>,
         cancellation_token: &CancellationToken,
+        chat_template: &ChatTemplateEngine,
     ) -> Result<(), QueueError> {
         let start_time = Instant::now();
 
@@ -717,20 +757,16 @@ impl RequestQueue {
 
             // Check for end of sequence token
             if model.is_eog_token(token) {
-                // Send final completion chunk
-                let final_chunk = StreamChunk {
-                    text: String::new(),
-                    is_complete: true,
-                    token_count: tokens_generated,
-                };
-                let _ = stream_sender.try_send(Ok(final_chunk));
-
-                let generation_time = start_time.elapsed();
-                debug!(
-                    "Worker {} completed streaming inference for request {} in {:?} ({} tokens, reason: EndOfSequence)",
-                    worker_id, request_id, generation_time, tokens_generated
+                return Self::handle_streaming_completion(
+                    worker_id,
+                    request_id,
+                    &generated_text,
+                    tokens_generated,
+                    start_time,
+                    &stream_sender,
+                    chat_template,
+                    "EndOfSequence",
                 );
-                return Ok(());
             }
 
             // Convert token to string
@@ -759,20 +795,16 @@ impl RequestQueue {
 
             // Check for stop tokens in the accumulated generated text
             if Self::should_stop(&generated_text, &request.stop_tokens) {
-                // Send final completion chunk
-                let final_chunk = StreamChunk {
-                    text: String::new(),
-                    is_complete: true,
-                    token_count: tokens_generated,
-                };
-                let _ = stream_sender.try_send(Ok(final_chunk));
-
-                let generation_time = start_time.elapsed();
-                debug!(
-                    "Worker {} completed streaming inference for request {} in {:?} ({} tokens, reason: StopToken)",
-                    worker_id, request_id, generation_time, tokens_generated
+                return Self::handle_streaming_completion(
+                    worker_id,
+                    request_id,
+                    &generated_text,
+                    tokens_generated,
+                    start_time,
+                    &stream_sender,
+                    chat_template,
+                    "StopToken",
                 );
-                return Ok(());
             }
 
             // Prepare next batch for continued generation
@@ -792,6 +824,53 @@ impl RequestQueue {
         }
 
         // If we exit the loop due to max tokens, send final completion chunk
+        Self::handle_streaming_completion(
+            worker_id,
+            request_id,
+            &generated_text,
+            tokens_generated,
+            start_time,
+            &stream_sender,
+            chat_template,
+            "MaxTokens",
+        )
+    }
+
+    /// Handle completion of streaming request with tool call detection
+    fn handle_streaming_completion(
+        worker_id: usize,
+        request_id: String,
+        generated_text: &str,
+        tokens_generated: u32,
+        start_time: Instant,
+        stream_sender: &mpsc::Sender<Result<StreamChunk, QueueError>>,
+        chat_template: &ChatTemplateEngine,
+        base_reason: &str,
+    ) -> Result<(), QueueError> {
+        // Check if the generated text contains tool calls
+        let has_tool_calls = match chat_template.extract_tool_calls(generated_text) {
+            Ok(tool_calls) if !tool_calls.is_empty() => {
+                debug!(
+                    "Worker {} detected {} tool calls in streaming output for request {}",
+                    worker_id, tool_calls.len(), request_id
+                );
+                true
+            }
+            Ok(_) => {
+                debug!("Worker {} no tool calls detected in streaming output for request {}", worker_id, request_id);
+                false
+            }
+            Err(e) => {
+                warn!(
+                    "Worker {} failed to extract tool calls from streaming output for request {}: {}",
+                    worker_id, request_id, e
+                );
+                false
+            }
+        };
+
+        // Create final completion chunk - for streaming, we can't change the finish reason
+        // but we could potentially add metadata to indicate tool calls were detected
         let final_chunk = StreamChunk {
             text: String::new(),
             is_complete: true,
@@ -800,9 +879,10 @@ impl RequestQueue {
         let _ = stream_sender.try_send(Ok(final_chunk));
 
         let generation_time = start_time.elapsed();
+        let reason_suffix = if has_tool_calls { " (with tool calls)" } else { "" };
         debug!(
-            "Worker {} completed streaming inference for request {} in {:?} ({} tokens, reason: MaxTokens)",
-            worker_id, request_id, generation_time, tokens_generated
+            "Worker {} completed streaming inference for request {} in {:?} ({} tokens, reason: {}{})",
+            worker_id, request_id, generation_time, tokens_generated, base_reason, reason_suffix
         );
 
         Ok(())

@@ -13,7 +13,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, info};
+use tracing::{debug, error, info, warn};
 
 pub struct AgentServer {
     model_manager: Arc<ModelManager>,
@@ -78,19 +78,185 @@ impl AgentServer {
         Ok(())
     }
 
+    /// Validate tool call arguments against the tool's parameter schema
+    fn validate_tool_arguments(
+        &self,
+        tool_call: &ToolCall,
+        tool_def: &crate::types::ToolDefinition,
+    ) -> Result<(), String> {
+        // If no parameters schema is defined, skip validation
+        if tool_def.parameters.is_null() {
+            debug!("No parameter schema defined for tool '{}'", tool_call.name);
+            return Ok(());
+        }
+
+        // Basic validation - could be enhanced with JSON Schema validation
+        if tool_call.arguments.is_null() && !tool_def.parameters.is_null() {
+            return Err("Tool requires arguments but none provided".to_string());
+        }
+
+        // Additional validation could be added here:
+        // - JSON Schema validation against tool_def.parameters
+        // - Type checking for required fields
+        // - Range validation for numeric parameters
+        
+        debug!(
+            "Tool arguments validation passed for '{}' (basic validation only)",
+            tool_call.name
+        );
+        Ok(())
+    }
+
+    /// Determine if tool calls should be executed in parallel
+    fn should_execute_in_parallel(&self, tool_calls: &[ToolCall]) -> bool {
+        // Simple heuristic: execute in parallel if there are multiple calls
+        // and they don't appear to be interdependent
+        
+        // For now, enable parallel execution for most cases
+        // TODO: Add more sophisticated dependency analysis
+        if tool_calls.len() <= 1 {
+            return false;
+        }
+
+        // Check for potential dependencies by looking for similar tool names
+        // that might modify the same resources
+        let mut tool_names = std::collections::HashSet::new();
+        for tool_call in tool_calls {
+            // If we have duplicate tool names, they might be interdependent
+            if !tool_names.insert(&tool_call.name) {
+                debug!(
+                    "Detected duplicate tool names, using sequential execution for safety"
+                );
+                return false;
+            }
+        }
+
+        debug!("No obvious dependencies detected, enabling parallel execution");
+        true
+    }
+
+    /// Execute multiple tool calls in parallel
+    async fn execute_tools_parallel(
+        &self,
+        tool_calls: Vec<ToolCall>,
+        session: &Session,
+    ) -> Vec<ToolResult> {
+        use futures::future::join_all;
+        
+        let futures = tool_calls.into_iter().map(|tool_call| {
+            let session = session.clone();
+            async move {
+                debug!("Starting parallel execution of tool: {}", tool_call.name);
+                
+                match self.execute_tool(tool_call.clone(), &session).await {
+                    Ok(result) => {
+                        debug!("Parallel tool call '{}' completed", tool_call.name);
+                        result
+                    }
+                    Err(e) => {
+                        error!("Parallel tool call '{}' failed: {}", tool_call.name, e);
+                        ToolResult {
+                            call_id: tool_call.id,
+                            result: serde_json::Value::Null,
+                            error: Some(format!("Parallel execution error: {}", e)),
+                        }
+                    }
+                }
+            }
+        });
+
+        let results = join_all(futures).await;
+        debug!("Parallel tool execution completed with {} results", results.len());
+        results
+    }
+
     async fn process_tool_calls(
         &self,
         text: &str,
         session: &Session,
     ) -> Result<Vec<ToolResult>, AgentError> {
-        let tool_calls = self.chat_template.extract_tool_calls(text)?;
-        let mut results = Vec::new();
+        debug!("Processing tool calls from generated text");
 
-        for tool_call in tool_calls {
-            debug!("Executing tool call: {:?}", tool_call);
-            let result = self.execute_tool(tool_call, session).await?;
-            results.push(result);
+        // Extract tool calls from the generated text
+        let tool_calls = match self.chat_template.extract_tool_calls(text) {
+            Ok(calls) => calls,
+            Err(e) => {
+                error!("Failed to extract tool calls from text: {}", e);
+                return Ok(Vec::new()); // Return empty results rather than failing
+            }
+        };
+
+        if tool_calls.is_empty() {
+            debug!("No tool calls found in generated text");
+            return Ok(Vec::new());
         }
+
+        debug!("Found {} tool calls to process", tool_calls.len());
+        let mut results = Vec::new();
+        let mut successful_calls = 0;
+        let mut failed_calls = 0;
+
+        // Check if we should execute tools in parallel or sequentially
+        let parallel_execution = tool_calls.len() > 1 && self.should_execute_in_parallel(&tool_calls);
+        
+        if parallel_execution {
+            debug!("Executing {} tool calls in parallel", tool_calls.len());
+            results = self.execute_tools_parallel(tool_calls, session).await;
+            
+            // Count results for logging
+            for result in &results {
+                if result.error.is_some() {
+                    failed_calls += 1;
+                } else {
+                    successful_calls += 1;
+                }
+            }
+        } else {
+            debug!("Executing {} tool calls sequentially", tool_calls.len());
+            
+            // Process each tool call sequentially
+            for (i, tool_call) in tool_calls.into_iter().enumerate() {
+                debug!(
+                    "Processing tool call {}/{}: {} (id: {})",
+                    i + 1,
+                    results.len() + 1,
+                    tool_call.name,
+                    tool_call.id
+                );
+
+                // Execute tool call - errors are handled within execute_tool and returned as ToolResult
+                match self.execute_tool(tool_call.clone(), session).await {
+                    Ok(result) => {
+                        if result.error.is_some() {
+                            failed_calls += 1;
+                            warn!("Tool call '{}' completed with error", tool_call.name);
+                        } else {
+                            successful_calls += 1;
+                            debug!("Tool call '{}' completed successfully", tool_call.name);
+                        }
+                        results.push(result);
+                    }
+                    Err(e) => {
+                        // This should rarely happen since execute_tool now handles errors internally
+                        failed_calls += 1;
+                        error!("Unexpected error executing tool call '{}': {}", tool_call.name, e);
+                        
+                        // Create error result to maintain call order and IDs
+                        let error_result = ToolResult {
+                            call_id: tool_call.id,
+                            result: serde_json::Value::Null,
+                            error: Some(format!("Execution error: {}", e)),
+                        };
+                        results.push(error_result);
+                    }
+                }
+            }
+        }
+
+        info!(
+            "Tool call processing completed: {} successful, {} failed, {} total",
+            successful_calls, failed_calls, results.len()
+        );
 
         Ok(results)
     }
@@ -159,35 +325,120 @@ impl AgentAPI for AgentServer {
             request.session.id
         );
 
-        // Render session to prompt
-        let prompt = self.render_session_prompt(&request.session).await?;
-        debug!("Session rendered to prompt: {} characters", prompt.len());
+        let mut working_session = request.session.clone();
+        let mut accumulated_response = String::new();
+        let mut total_tokens = 0u32;
+        let mut iterations = 0;
+        const MAX_TOOL_ITERATIONS: usize = 5; // Prevent infinite tool call loops
 
-        // Clone session for later use if needed
-        let session_for_tools = request.session.clone();
+        loop {
+            iterations += 1;
+            if iterations > MAX_TOOL_ITERATIONS {
+                warn!(
+                    "Maximum tool call iterations ({}) reached for session: {}",
+                    MAX_TOOL_ITERATIONS, working_session.id
+                );
+                break;
+            }
 
-        // Submit to request queue
-        let response = self.request_queue.submit_request(request).await?;
-
-        // Check if response contains tool calls
-        if response.finish_reason == crate::types::FinishReason::ToolCall {
-            debug!("Response contains tool calls, processing...");
-            let tool_results = self
-                .process_tool_calls(&response.generated_text, &session_for_tools)
-                .await?;
-
-            // Add tool results as messages to the session (but don't modify the original request session)
             debug!(
-                "Tool call processing completed with {} results",
-                tool_results.len()
+                "Tool call iteration {} for session: {}",
+                iterations, working_session.id
             );
+
+            // Create generation request with current session state
+            let current_request = GenerationRequest {
+                session: working_session.clone(),
+                max_tokens: request.max_tokens,
+                temperature: request.temperature,
+                top_p: request.top_p,
+                stop_tokens: request.stop_tokens.clone(),
+            };
+
+            // Submit to request queue
+            let response = self.request_queue.submit_request(current_request).await?;
+            
+            accumulated_response.push_str(&response.generated_text);
+            total_tokens += response.tokens_generated;
+
+            debug!(
+                "Generation iteration {} completed: {} tokens, finish_reason: {:?}",
+                iterations, response.tokens_generated, response.finish_reason
+            );
+
+            // Check if response contains tool calls
+            if response.finish_reason == crate::types::FinishReason::ToolCall {
+                debug!("Response contains tool calls, processing...");
+                
+                // Process tool calls
+                let tool_results = self
+                    .process_tool_calls(&response.generated_text, &working_session)
+                    .await?;
+
+                if tool_results.is_empty() {
+                    debug!("No tool results returned, ending tool call workflow");
+                    break;
+                }
+
+                // Add the assistant's response (with tool calls) to the session
+                working_session.messages.push(crate::types::Message {
+                    role: crate::types::MessageRole::Assistant,
+                    content: response.generated_text.clone(),
+                    tool_call_id: None,
+                    tool_name: None,
+                    timestamp: std::time::SystemTime::now(),
+                });
+
+                // Add tool results as Tool messages to the session
+                for tool_result in &tool_results {
+                    let tool_content = if let Some(error) = &tool_result.error {
+                        format!("Error: {}", error)
+                    } else {
+                        serde_json::to_string(&tool_result.result)
+                            .unwrap_or_else(|_| "Invalid tool result".to_string())
+                    };
+
+                    working_session.messages.push(crate::types::Message {
+                        role: crate::types::MessageRole::Tool,
+                        content: tool_content,
+                        tool_call_id: Some(tool_result.call_id),
+                        tool_name: None,
+                        timestamp: std::time::SystemTime::now(),
+                    });
+                }
+
+                working_session.updated_at = std::time::SystemTime::now();
+
+                debug!(
+                    "Tool call processing completed with {} results, continuing generation",
+                    tool_results.len()
+                );
+
+                // Continue the loop to generate response incorporating tool results
+                continue;
+            } else {
+                // No more tool calls, we're done
+                debug!(
+                    "Generation completed without tool calls after {} iterations",
+                    iterations
+                );
+                break;
+            }
         }
 
+        let final_response = GenerationResponse {
+            generated_text: accumulated_response,
+            tokens_generated: total_tokens,
+            generation_time: std::time::Duration::from_millis(0), // This would need proper timing
+            finish_reason: crate::types::FinishReason::EndOfSequence, // Or original finish reason
+        };
+
         debug!(
-            "Generation completed: {} tokens generated",
-            response.tokens_generated
+            "Complete generation workflow finished: {} total tokens across {} iterations",
+            total_tokens, iterations
         );
-        Ok(response)
+
+        Ok(final_response)
     }
 
     async fn generate_stream(
@@ -259,36 +510,87 @@ impl AgentAPI for AgentServer {
         session: &Session,
     ) -> Result<ToolResult, AgentError> {
         debug!(
-            "Executing tool call: {} in session: {}",
-            tool_call.name, session.id
+            "Executing tool call: {} (id: {}) in session: {}",
+            tool_call.name, tool_call.id, session.id
         );
 
+        // Validate tool call name is not empty
+        if tool_call.name.trim().is_empty() {
+            let error_msg = "Tool name cannot be empty";
+            error!("{}", error_msg);
+            return Ok(ToolResult {
+                call_id: tool_call.id,
+                result: serde_json::Value::Null,
+                error: Some(error_msg.to_string()),
+            });
+        }
+
         // Find the tool definition
-        let tool_def = session
+        let tool_def = match session
             .available_tools
             .iter()
             .find(|t| t.name == tool_call.name)
-            .ok_or_else(|| {
-                AgentError::MCP(crate::types::MCPError::ServerNotFound(format!(
-                    "Tool '{}' not found in available tools",
-                    tool_call.name
-                )))
-            })?;
-
-        // Execute the tool call through MCP client
-        let result_value = self
-            .mcp_client
-            .call_tool(&tool_def.server_name, &tool_call.name, tool_call.arguments)
-            .await?;
-
-        let result = ToolResult {
-            call_id: tool_call.id,
-            result: result_value,
-            error: None,
+        {
+            Some(tool) => tool,
+            None => {
+                let error_msg = format!(
+                    "Tool '{}' not found in available tools. Available tools: {}",
+                    tool_call.name,
+                    session.available_tools.iter()
+                        .map(|t| t.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                error!("{}", error_msg);
+                return Ok(ToolResult {
+                    call_id: tool_call.id,
+                    result: serde_json::Value::Null,
+                    error: Some(error_msg),
+                });
+            }
         };
 
-        debug!("Tool call completed successfully: {}", tool_call.name);
-        Ok(result)
+        debug!(
+            "Found tool definition for '{}' on server '{}'",
+            tool_call.name, tool_def.server_name
+        );
+
+        // Validate tool arguments structure if parameters schema is available
+        if let Err(validation_error) = self.validate_tool_arguments(&tool_call, tool_def) {
+            warn!(
+                "Tool call arguments validation failed for '{}': {}",
+                tool_call.name, validation_error
+            );
+            // Continue execution despite validation failure but log the issue
+        }
+
+        // Execute the tool call through MCP client with error handling
+        match self
+            .mcp_client
+            .call_tool(&tool_def.server_name, &tool_call.name, tool_call.arguments)
+            .await
+        {
+            Ok(result_value) => {
+                debug!("Tool call '{}' completed successfully", tool_call.name);
+                Ok(ToolResult {
+                    call_id: tool_call.id,
+                    result: result_value,
+                    error: None,
+                })
+            }
+            Err(mcp_error) => {
+                let error_msg = format!("Tool execution failed: {}", mcp_error);
+                error!("Tool call '{}' failed: {}", tool_call.name, error_msg);
+                
+                // Return ToolResult with error instead of propagating the error
+                // This allows the workflow to continue with partial failures
+                Ok(ToolResult {
+                    call_id: tool_call.id,
+                    result: serde_json::Value::Null,
+                    error: Some(error_msg),
+                })
+            }
+        }
     }
 
     async fn health(&self) -> Result<HealthStatus, AgentError> {
