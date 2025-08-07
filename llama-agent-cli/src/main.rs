@@ -83,19 +83,34 @@ struct Args {
     /// Top-p for nucleus sampling (0.0 to 1.0)
     #[arg(long, default_value = "0.9")]
     top_p: f32,
+
+    /// Enable debug logging (shows verbose llama_cpp model loading output)
+    #[arg(long, default_value = "false")]
+    debug: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
-
     let args = Args::parse();
 
-    info!("Starting llama-agent-cli");
-    info!("Model: {}", args.model);
-    info!("Filename: {:?}", args.filename);
-    info!("Prompt: {}", args.prompt);
-    info!("Limit: {}", args.limit);
+    // Configure logging level based on debug flag
+    if args.debug {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .init();
+    }
+
+    if args.debug {
+        info!("Starting llama-agent-cli");
+        info!("Model: {}", args.model);
+        info!("Filename: {:?}", args.filename);
+        info!("Prompt: {}", args.prompt);
+        info!("Limit: {}", args.limit);
+    }
 
     // Initialize agent components and process request
     match run_agent(args).await {
@@ -238,6 +253,7 @@ fn validate_args(args: &Args) -> Result<()> {
 }
 
 async fn run_agent(args: Args) -> Result<String> {
+    let debug_mode = args.debug;
     // Validate arguments
     validate_args(&args)?;
 
@@ -284,7 +300,9 @@ async fn run_agent(args: Args) -> Result<String> {
         parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
-    info!("Initializing AgentServer (this may take a while for model loading)...");
+    if debug_mode {
+        info!("Initializing AgentServer (this may take a while for model loading)...");
+    }
     println!("Loading model from {}...", args.model);
 
     // Initialize agent server with progress indication
@@ -321,7 +339,9 @@ async fn run_agent(args: Args) -> Result<String> {
     // Check for shutdown signal before proceeding
     if shutdown_rx.try_recv().is_ok() {
         if let Some(agent) = agent_option.take() {
-            info!("Performing graceful shutdown...");
+            if debug_mode {
+                info!("Performing graceful shutdown...");
+            }
             if let Err(e) = agent.shutdown().await {
                 error!("Error during shutdown: {}", e);
             }
@@ -333,12 +353,14 @@ async fn run_agent(args: Args) -> Result<String> {
 
     // Create a session
     let mut session = agent.create_session().await?;
-    info!("Created session: {}", session.id);
+    if debug_mode {
+        info!("Created session: {}", session.id);
+    }
 
     // Discover available tools (even though we have none configured)
     agent.discover_tools(&mut session).await?;
 
-    if !session.available_tools.is_empty() {
+    if !session.available_tools.is_empty() && debug_mode {
         info!("Discovered {} tools", session.available_tools.len());
         for tool in &session.available_tools {
             println!("  - {}: {}", tool.name, tool.description);
@@ -424,11 +446,16 @@ async fn run_agent(args: Args) -> Result<String> {
 
             // Handle warnings based on finish reason or token count
             if token_count >= args.limit {
-                println!("\n⚠️  Response may have been truncated due to token limit ({})", args.limit);
+                println!(
+                    "\n⚠️  Response may have been truncated due to token limit ({})",
+                    args.limit
+                );
             }
 
             // Check if the response looks like it contains tool calls
-            if full_response.contains("```") && (full_response.contains("function_call") || full_response.contains("tool_call")) {
+            if full_response.contains("```")
+                && (full_response.contains("function_call") || full_response.contains("tool_call"))
+            {
                 println!("\n⚠️  Model wants to call tools, but basic CLI doesn't support tool execution yet.");
             }
 

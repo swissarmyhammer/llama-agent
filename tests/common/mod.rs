@@ -1,6 +1,7 @@
 use llama_agent::{
-    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, Session,
-    SessionConfig, SessionId, ToolCall, ToolCallId, ToolDefinition, ToolResult,
+    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig,
+    QueueConfig, Session, SessionConfig, SessionId, ToolCall, ToolCallId, ToolDefinition,
+    ToolResult,
 };
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
