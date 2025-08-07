@@ -515,7 +515,7 @@ pub enum ModelError {
     InferenceFailed(String),
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum QueueError {
     #[error("Queue is full")]
     Full,
