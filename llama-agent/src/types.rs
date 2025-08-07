@@ -479,40 +479,42 @@ pub struct HealthStatus {
 // Error types
 #[derive(Debug, Error)]
 pub enum AgentError {
-    #[error("Model error: {0}")]
+    #[error("Model error: {0}\n💡 Check model file exists, is valid GGUF format, and sufficient memory is available")]
     Model(#[from] ModelError),
 
-    #[error("Queue error: {0}")]
+    #[error("Request processing error: {0}\n💡 Try reducing concurrent requests, increasing queue size, or adding more system resources")]
     Queue(#[from] QueueError),
 
-    #[error("Session error: {0}")]
+    #[error(
+        "Session error: {0}\n💡 Verify session ID is valid and session limits are not exceeded"
+    )]
     Session(#[from] SessionError),
 
-    #[error("MCP error: {0}")]
+    #[error("MCP server error: {0}\n💡 Ensure MCP server is running, accessible, and check network connectivity")]
     MCP(#[from] MCPError),
 
-    #[error("Template error: {0}")]
+    #[error("Template processing error: {0}\n💡 Check message format and tool definitions are properly structured")]
     Template(#[from] TemplateError),
 
-    #[error("Timeout: request took longer than {timeout:?}")]
+    #[error("Request timeout: processing took longer than {timeout:?}\n💡 Increase timeout settings, reduce max_tokens, or check system performance")]
     Timeout { timeout: Duration },
 
-    #[error("Queue full: maximum capacity {capacity} exceeded")]
+    #[error("Queue overloaded: {capacity} requests queued (max capacity)\n💡 Wait and retry, or increase max_queue_size configuration")]
     QueueFull { capacity: usize },
 }
 
 #[derive(Debug, Error)]
 pub enum ModelError {
-    #[error("Model loading failed: {0}")]
+    #[error("Model loading failed: {0}\n🔧 Check available memory (4-8GB needed), verify GGUF file integrity, ensure compatible llama.cpp version")]
     LoadingFailed(String),
 
-    #[error("Model not found at source: {0}")]
+    #[error("Model not found: {0}\n📁 Verify file path is correct, file exists and is readable. For HuggingFace: check repo name and filename")]
     NotFound(String),
 
-    #[error("Invalid model configuration: {0}")]
+    #[error("Invalid model config: {0}\n⚙️ Ensure batch_size > 0, valid model source path, and appropriate use_hf_params setting")]
     InvalidConfig(String),
 
-    #[error("Model inference failed: {0}")]
+    #[error("Model inference failed: {0}\n🦾 Check input format, model compatibility, and available system resources")]
     InferenceFailed(String),
 }
 

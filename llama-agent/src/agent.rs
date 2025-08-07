@@ -62,19 +62,48 @@ impl AgentServer {
 
     pub async fn shutdown(self) -> Result<(), AgentError> {
         info!("Initiating AgentServer shutdown");
+        let shutdown_start = Instant::now();
 
         // Signal shutdown to all components
         self.shutdown_token.cancel();
 
-        // Shutdown MCP client first
-        self.mcp_client.shutdown_all().await?;
+        // Graceful shutdown with timeouts
+        let shutdown_timeout = std::time::Duration::from_secs(30);
 
-        // Stop accepting new requests - this consumes the request queue
-        // Note: RequestQueue::shutdown() takes ownership, so we need to handle this carefully
-        // For now, we'll skip this since it's not critical for the core functionality
-        info!("Request queue will be dropped automatically");
+        // Shutdown MCP client first with timeout
+        info!("Shutting down MCP client...");
+        let mcp_shutdown = async { self.mcp_client.shutdown_all().await };
 
-        info!("AgentServer shutdown completed");
+        match tokio::time::timeout(shutdown_timeout, mcp_shutdown).await {
+            Ok(result) => result?,
+            Err(_) => {
+                warn!("MCP client shutdown timed out after {:?}", shutdown_timeout);
+            }
+        }
+
+        // Wait for queue to finish current requests with timeout
+        info!("Waiting for request queue to drain...");
+        let queue_stats = self.request_queue.get_stats();
+        if queue_stats.current_queue_size > 0 {
+            warn!(
+                "Shutting down with {} requests still in queue",
+                queue_stats.current_queue_size
+            );
+
+            // Give some time for current requests to complete
+            let drain_timeout = std::time::Duration::from_secs(10);
+            tokio::time::sleep(drain_timeout).await;
+        }
+
+        // Force shutdown of remaining components
+        info!("Forcing shutdown of remaining components...");
+
+        let shutdown_duration = shutdown_start.elapsed();
+        info!(
+            "AgentServer shutdown completed in {:?} (Final stats: {} completed, {} failed)",
+            shutdown_duration, queue_stats.completed_requests, queue_stats.failed_requests
+        );
+
         Ok(())
     }
 
@@ -274,6 +303,176 @@ impl AgentServer {
             .await?
             .map_err(AgentError::Template)
     }
+
+    /// Comprehensive security validation for generation requests
+    fn validate_generation_request(&self, request: &GenerationRequest) -> Result<(), AgentError> {
+        // Validate session has messages
+        if request.session.messages.is_empty() {
+            return Err(AgentError::Session(
+                crate::types::SessionError::InvalidState(
+                    "Session must have at least one message for generation".to_string(),
+                ),
+            ));
+        }
+
+        // Security: Validate message content length and content
+        for (i, message) in request.session.messages.iter().enumerate() {
+            // DoS protection: limit message size
+            if message.content.len() > 100_000 {
+                return Err(AgentError::Session(
+                    crate::types::SessionError::InvalidState(format!(
+                        "Message {} exceeds maximum length of 100KB (current: {}KB)",
+                        i,
+                        message.content.len() / 1000
+                    )),
+                ));
+            }
+
+            // Security: Check for potentially malicious content patterns
+            if Self::contains_suspicious_content(&message.content) {
+                warn!("Blocking message {} with suspicious content patterns", i);
+                return Err(AgentError::Session(
+                    crate::types::SessionError::InvalidState(
+                        "Message contains potentially unsafe content patterns".to_string(),
+                    ),
+                ));
+            }
+
+            // Security: Check for excessive repetition (could indicate spam/DoS)
+            if Self::has_excessive_repetition(&message.content) {
+                warn!("Blocking message {} with excessive repetition", i);
+                return Err(AgentError::Session(
+                    crate::types::SessionError::InvalidState(
+                        "Message contains excessive repetition patterns".to_string(),
+                    ),
+                ));
+            }
+        }
+
+        // Security: Validate generation parameters with bounds
+        if let Some(max_tokens) = request.max_tokens {
+            if max_tokens == 0 {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    "max_tokens must be greater than 0".to_string(),
+                )));
+            }
+            if max_tokens > 32_768 {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    format!(
+                        "max_tokens exceeds security limit of 32K (requested: {})",
+                        max_tokens
+                    ),
+                )));
+            }
+        }
+
+        // Validate temperature with security bounds
+        if let Some(temp) = request.temperature {
+            if !temp.is_finite() {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    "temperature must be a finite number".to_string(),
+                )));
+            }
+            if !(0.0..=2.0).contains(&temp) {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    format!("temperature must be between 0.0 and 2.0 (got: {})", temp),
+                )));
+            }
+        }
+
+        // Validate top_p with security bounds
+        if let Some(top_p) = request.top_p {
+            if !top_p.is_finite() {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    "top_p must be a finite number".to_string(),
+                )));
+            }
+            if !(0.0..=1.0).contains(&top_p) {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    format!("top_p must be between 0.0 and 1.0 (got: {})", top_p),
+                )));
+            }
+        }
+
+        // Security: Validate stop tokens
+        if request.stop_tokens.len() > 20 {
+            return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                format!(
+                    "Too many stop tokens: {} (max 20 allowed)",
+                    request.stop_tokens.len()
+                ),
+            )));
+        }
+
+        for (i, stop_token) in request.stop_tokens.iter().enumerate() {
+            if stop_token.len() > 100 {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    format!("Stop token {} exceeds maximum length of 100 chars", i),
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check for potentially suspicious content patterns
+    fn contains_suspicious_content(content: &str) -> bool {
+        let suspicious_patterns = [
+            "<script",
+            "</script>",
+            "javascript:",
+            "eval(",
+            "function(",
+            "${{",
+            "}}",
+            "<%",
+            "%>",
+            "<?php",
+            "?>",
+            "rm -rf",
+            "DELETE FROM",
+            "DROP TABLE",
+            "INSERT INTO",
+            "../../../",
+            "..\\..\\..\\", // Path traversal
+        ];
+
+        let content_lower = content.to_lowercase();
+        suspicious_patterns
+            .iter()
+            .any(|pattern| content_lower.contains(pattern))
+    }
+
+    /// Check for excessive repetition that might indicate spam/DoS
+    fn has_excessive_repetition(content: &str) -> bool {
+        if content.len() < 100 {
+            return false; // Short content is fine
+        }
+
+        // Check for repeated substrings
+        let chars: Vec<char> = content.chars().collect();
+        let len = chars.len();
+
+        // Check for repeated 4-char patterns
+        if len >= 20 {
+            for i in 0..=(len - 20) {
+                let pattern = &chars[i..i + 4];
+                let mut count = 1;
+
+                for j in ((i + 4)..=(len - 4)).step_by(4) {
+                    if &chars[j..j + 4] == pattern {
+                        count += 1;
+                        if count >= 5 {
+                            // 5+ repetitions of 4-char pattern
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
 }
 
 #[async_trait]
@@ -331,6 +530,9 @@ impl AgentAPI for AgentServer {
             "Processing generation request for session: {}",
             request.session.id
         );
+
+        // Security: Validate input before processing
+        self.validate_generation_request(&request)?;
 
         let mut working_session = request.session.clone();
         let mut accumulated_response = String::new();
@@ -457,6 +659,9 @@ impl AgentAPI for AgentServer {
             "Processing streaming generation request for session: {}",
             request.session.id
         );
+
+        // Security: Validate input before processing
+        self.validate_generation_request(&request)?;
 
         // Render session to prompt
         let prompt = self.render_session_prompt(&request.session).await?;

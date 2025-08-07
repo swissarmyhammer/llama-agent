@@ -1,26 +1,25 @@
 //! Integration Tests for Examples
-//! 
+//!
 //! This module contains automated tests that validate all the examples
 //! work correctly. These tests serve as both validation and documentation
 //! of expected behavior.
 
 use llama_agent::{
     types::{
-        AgentAPI, AgentConfig, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, QueueConfig, SessionConfig, SessionId,
+        AgentAPI, AgentConfig, GenerationRequest, MCPServerConfig, Message, MessageRole,
+        ModelConfig, ModelSource, QueueConfig, SessionConfig, SessionId,
     },
     AgentServer,
 };
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
-use tokio_stream::StreamExt;
 use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging for test diagnostics
     tracing_subscriber::fmt::init();
-    
+
     info!("Starting integration tests for examples");
 
     println!("Integration Tests for Llama Agent Examples");
@@ -144,8 +143,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("All integration tests passed");
     } else {
         println!("\n⚠ Some tests failed. Check logs for details.");
-        warn!("Some integration tests failed: {} out of {}", 
-            failed_tests, passed_tests + failed_tests);
+        warn!(
+            "Some integration tests failed: {} out of {}",
+            failed_tests,
+            passed_tests + failed_tests
+        );
     }
 
     // Return appropriate exit code
@@ -173,7 +175,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
     };
-    
+
     // Configuration should pass validation (even if model loading fails)
     match valid_hf_config.validate() {
         Ok(_) => info!("Valid HuggingFace config passed validation"),
@@ -265,7 +267,10 @@ async fn test_agent_initialization() -> Result<(), Box<dyn std::error::Error>> {
     match AgentServer::initialize(invalid_model_config).await {
         Ok(_) => return Err("Initialization should fail with invalid model path".into()),
         Err(e) => {
-            info!("Agent initialization correctly failed with invalid model: {}", e);
+            info!(
+                "Agent initialization correctly failed with invalid model: {}",
+                e
+            );
             // Verify it's the right type of error
             if !e.to_string().contains("not found") && !e.to_string().contains("does not exist") {
                 return Err(format!("Expected 'not found' error, got: {}", e).into());
@@ -288,7 +293,10 @@ async fn test_agent_initialization() -> Result<(), Box<dyn std::error::Error>> {
     match AgentServer::initialize(invalid_queue_config).await {
         Ok(_) => return Err("Initialization should fail with invalid queue config".into()),
         Err(e) => {
-            info!("Agent initialization correctly failed with invalid queue config: {}", e);
+            info!(
+                "Agent initialization correctly failed with invalid queue config: {}",
+                e
+            );
         }
     }
 
@@ -303,25 +311,26 @@ async fn test_session_management() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 1: Session ID generation and uniqueness
     use llama_agent::types::SessionId;
-    
+
     let session_id1 = SessionId::new();
     let session_id2 = SessionId::new();
-    
+
     if session_id1 == session_id2 {
         return Err("Session IDs should be unique".into());
     }
-    
+
     info!("Session ID uniqueness verified");
 
     // Test 2: Session serialization/deserialization
     let session_id_str = session_id1.to_string();
-    let parsed_session_id: SessionId = session_id_str.parse()
+    let parsed_session_id: SessionId = session_id_str
+        .parse()
         .map_err(|e| format!("Failed to parse session ID: {}", e))?;
-    
+
     if session_id1 != parsed_session_id {
         return Err("Session ID should survive serialization round-trip".into());
     }
-    
+
     info!("Session ID serialization verified");
 
     // Test 3: Message creation and validation
@@ -386,10 +395,10 @@ async fn test_error_handling() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 4: Error type hierarchy
     use llama_agent::types::{AgentError, ModelError};
-    
+
     let model_error = ModelError::NotFound("test".to_string());
     let agent_error: AgentError = model_error.into();
-    
+
     match agent_error {
         AgentError::Model(_) => info!("Error conversion works correctly"),
         _ => return Err("Error should be converted to Model variant".into()),
@@ -432,7 +441,7 @@ async fn test_mcp_integration() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 3: Tool definition structure
     use llama_agent::types::ToolDefinition;
-    
+
     let tool_def = ToolDefinition {
         name: "test_tool".to_string(),
         description: "Test tool".to_string(),
@@ -448,7 +457,7 @@ async fn test_mcp_integration() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 4: Tool call and result structures
     use llama_agent::types::{ToolCall, ToolCallId, ToolResult};
-    
+
     let tool_call_id = ToolCallId::new();
     let tool_call = ToolCall {
         id: tool_call_id,
@@ -476,7 +485,7 @@ async fn test_streaming_patterns() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 1: Stream chunk structure
     use llama_agent::types::StreamChunk;
-    
+
     let chunk = StreamChunk {
         text: "Hello".to_string(),
         is_complete: false,
@@ -494,7 +503,7 @@ async fn test_streaming_patterns() -> Result<(), Box<dyn std::error::Error>> {
     info!("Stream chunk structure verified");
 
     // Test 2: Generation request structure for streaming
-    let temp_dir = std::env::temp_dir();
+    let _temp_dir = std::env::temp_dir();
     let session = llama_agent::types::Session {
         id: SessionId::new(),
         messages: vec![],
@@ -633,7 +642,11 @@ async fn test_cli_argument_patterns() -> Result<(), Box<dyn std::error::Error>> 
     ];
 
     for repo in invalid_repos {
-        if repo.contains('/') && repo.split('/').count() == 2 && !repo.starts_with('/') && !repo.ends_with('/') {
+        if repo.contains('/')
+            && repo.split('/').count() == 2
+            && !repo.starts_with('/')
+            && !repo.ends_with('/')
+        {
             return Err(format!("Invalid repo format passed validation: {}", repo).into());
         }
     }
@@ -659,11 +672,7 @@ async fn test_cli_argument_patterns() -> Result<(), Box<dyn std::error::Error>> 
     info!("Parameter range validation verified");
 
     // Test 3: File extension validation
-    let valid_filenames = vec![
-        "model.gguf",
-        "model-bf16.gguf",
-        "llama-2-7b.q4_k_m.gguf",
-    ];
+    let valid_filenames = vec!["model.gguf", "model-bf16.gguf", "llama-2-7b.q4_k_m.gguf"];
 
     for filename in valid_filenames {
         if !filename.ends_with(".gguf") {
@@ -671,12 +680,7 @@ async fn test_cli_argument_patterns() -> Result<(), Box<dyn std::error::Error>> 
         }
     }
 
-    let invalid_filenames = vec![
-        "model.txt",
-        "model",
-        "model.bin",
-        "",
-    ];
+    let invalid_filenames = vec!["model.txt", "model", "model.bin", ""];
 
     for filename in invalid_filenames {
         if filename.ends_with(".gguf") && !filename.is_empty() {

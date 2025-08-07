@@ -1,8 +1,8 @@
 //! Error Handling and Recovery Examples
-//! 
+//!
 //! This example demonstrates various error conditions that can occur when using
 //! the llama-agent library and how to handle them gracefully:
-//! 
+//!
 //! - Model loading failures
 //! - Invalid configurations
 //! - MCP server connection issues
@@ -25,7 +25,7 @@ use tracing::{error, info, warn};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging to see error details
     tracing_subscriber::fmt::init();
-    
+
     info!("Starting error handling and recovery examples");
 
     println!("Error Handling and Recovery Examples");
@@ -33,19 +33,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 1: Invalid model configuration
     demonstrate_invalid_model_config().await?;
-    
+
     // Example 2: MCP server failures
     demonstrate_mcp_server_failures().await?;
-    
+
     // Example 3: Generation errors and recovery
     demonstrate_generation_errors().await?;
-    
+
     // Example 4: Tool execution failures
     demonstrate_tool_failures().await?;
-    
+
     // Example 5: Timeout handling
     demonstrate_timeout_handling().await?;
-    
+
     // Example 6: Graceful degradation
     demonstrate_graceful_degradation().await?;
 
@@ -165,12 +165,15 @@ async fn demonstrate_mcp_server_failures() -> Result<(), Box<dyn std::error::Err
     match AgentServer::initialize(config_with_invalid_mcp).await {
         Ok(agent) => {
             println!("✓ Agent initialized despite MCP failures (graceful degradation)");
-            
+
             // Test tool discovery with partial MCP failures
             let mut session = agent.create_session().await?;
             match agent.discover_tools(&mut session).await {
                 Ok(_) => {
-                    println!("✓ Tool discovery succeeded with {} tools", session.available_tools.len());
+                    println!(
+                        "✓ Tool discovery succeeded with {} tools",
+                        session.available_tools.len()
+                    );
                     for tool in &session.available_tools {
                         println!("  - {}: {}", tool.name, tool.description);
                     }
@@ -216,7 +219,7 @@ async fn demonstrate_generation_errors() -> Result<(), Box<dyn std::error::Error
     match AgentServer::initialize(config).await {
         Ok(agent) => {
             println!("✓ Agent initialized successfully");
-            
+
             // Test with problematic prompt
             let mut session = agent.create_session().await?;
             session.messages.push(Message {
@@ -246,7 +249,10 @@ async fn demonstrate_generation_errors() -> Result<(), Box<dyn std::error::Error
                             println!("  ℹ Generation stopped due to token limit");
                         }
                         _ => {
-                            println!("  ✓ Generation completed normally: {:?}", response.finish_reason);
+                            println!(
+                                "  ✓ Generation completed normally: {:?}",
+                                response.finish_reason
+                            );
                         }
                     }
                     println!("  Tokens generated: {}", response.tokens_generated);
@@ -272,20 +278,20 @@ async fn demonstrate_tool_failures() -> Result<(), Box<dyn std::error::Error>> {
 
     // This test would require a working agent with MCP servers
     // For now, we'll demonstrate the error handling patterns
-    
+
     println!("Tool execution failures can occur due to:");
     println!("  • Tool not found in available tools");
     println!("  • Invalid tool arguments");
     println!("  • MCP server communication errors");
     println!("  • Tool execution timeouts");
     println!("  • Underlying system errors (file permissions, network, etc.)");
-    
+
     println!("\nError handling strategies:");
     println!("  • ToolResult includes error field for graceful failure reporting");
     println!("  • Partial tool execution continues workflow with available results");
     println!("  • Tool call validation prevents invalid requests");
     println!("  • Retry mechanisms for transient failures");
-    
+
     // Show conceptual error handling
     println!("\nConceptual tool error handling:");
     println!("```rust");
@@ -317,19 +323,19 @@ async fn demonstrate_timeout_handling() -> Result<(), Box<dyn std::error::Error>
 
     // Demonstrate different timeout scenarios
     println!("Timeout scenarios and handling:");
-    
+
     println!("\n• Model loading timeout:");
     println!("  - Occurs when model download/loading takes too long");
     println!("  - Handled by: retry with exponential backoff, fallback models");
-    
+
     println!("\n• Generation timeout:");
     println!("  - Occurs when token generation takes too long");
     println!("  - Handled by: configurable request_timeout, partial results");
-    
+
     println!("\n• MCP server timeout:");
     println!("  - Occurs when tool execution exceeds timeout_secs");
     println!("  - Handled by: per-server timeouts, graceful degradation");
-    
+
     println!("\n• Network timeout:");
     println!("  - Occurs during model download or MCP communication");
     println!("  - Handled by: retry logic, offline mode, cached resources");
@@ -357,22 +363,22 @@ async fn demonstrate_graceful_degradation() -> Result<(), Box<dyn std::error::Er
 
     println!("Graceful degradation allows the system to continue operating");
     println!("with reduced functionality when components fail:");
-    
+
     println!("\n• Model failures:");
     println!("  → Fallback to smaller/cached model");
     println!("  → Offline mode with pre-computed responses");
     println!("  → Error messages with helpful guidance");
-    
+
     println!("\n• MCP server failures:");
     println!("  → Continue with available servers only");
     println!("  → Inform user about unavailable tools");
     println!("  → Provide manual alternatives");
-    
+
     println!("\n• Tool execution failures:");
     println!("  → Return error in ToolResult, continue workflow");
     println!("  → Skip failed tools, process successful ones");
     println!("  → Suggest alternative approaches to user");
-    
+
     println!("\n• Network failures:");
     println!("  → Use cached models and data");
     println!("  → Queue operations for later retry");
@@ -429,7 +435,7 @@ where
     E: std::fmt::Display,
 {
     let mut delay = initial_delay;
-    
+
     for attempt in 0..max_retries {
         match operation().await {
             Ok(result) => return Ok(result),
@@ -438,12 +444,18 @@ where
                 return Err(e);
             }
             Err(e) => {
-                warn!("Attempt {} failed: {}, retrying in {:?}", attempt + 1, e, delay);
+                warn!(
+                    "Attempt {} failed: {}, retrying in {:?}",
+                    attempt + 1,
+                    e,
+                    delay
+                );
                 tokio::time::sleep(delay).await;
-                delay = Duration::from_millis((delay.as_millis() * 2).min(30000) as u64); // Cap at 30s
+                delay = Duration::from_millis((delay.as_millis() * 2).min(30000) as u64);
+                // Cap at 30s
             }
         }
     }
-    
+
     unreachable!()
 }

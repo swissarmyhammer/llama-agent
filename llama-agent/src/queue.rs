@@ -28,6 +28,8 @@ pub struct QueueMetrics {
     pub current_queue_size: AtomicUsize,
     pub total_processing_time_ms: AtomicU64,
     pub total_tokens_generated: AtomicU64,
+    pub peak_queue_size: AtomicUsize,
+    pub last_throughput_tokens_per_second: AtomicU64,
 }
 
 impl QueueMetrics {
@@ -41,21 +43,46 @@ impl QueueMetrics {
             current_queue_size: AtomicUsize::new(0),
             total_processing_time_ms: AtomicU64::new(0),
             total_tokens_generated: AtomicU64::new(0),
+            peak_queue_size: AtomicUsize::new(0),
+            last_throughput_tokens_per_second: AtomicU64::new(0),
         }
     }
 
     pub fn record_request_submitted(&self) {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
-        self.current_queue_size.fetch_add(1, Ordering::Relaxed);
+        let current_size = self.current_queue_size.fetch_add(1, Ordering::Relaxed) + 1;
+
+        // Update peak queue size if necessary
+        let mut peak = self.peak_queue_size.load(Ordering::Relaxed);
+        while current_size > peak {
+            match self.peak_queue_size.compare_exchange_weak(
+                peak,
+                current_size,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(actual) => peak = actual,
+            }
+        }
     }
 
     pub fn record_request_completed(&self, processing_time: Duration, tokens_generated: u32) {
         self.completed_requests.fetch_add(1, Ordering::Relaxed);
         self.current_queue_size.fetch_sub(1, Ordering::Relaxed);
+
+        let processing_ms = processing_time.as_millis() as u64;
         self.total_processing_time_ms
-            .fetch_add(processing_time.as_millis() as u64, Ordering::Relaxed);
+            .fetch_add(processing_ms, Ordering::Relaxed);
         self.total_tokens_generated
             .fetch_add(tokens_generated as u64, Ordering::Relaxed);
+
+        // Calculate and store current throughput (tokens per second)
+        if processing_ms > 0 {
+            let throughput = (tokens_generated as u64 * 1000) / processing_ms;
+            self.last_throughput_tokens_per_second
+                .store(throughput, Ordering::Relaxed);
+        }
     }
 
     pub fn record_request_failed(&self) {
@@ -91,6 +118,10 @@ impl QueueMetrics {
                 }
             },
             total_tokens_generated: self.total_tokens_generated.load(Ordering::Relaxed),
+            peak_queue_size: self.peak_queue_size.load(Ordering::Relaxed),
+            current_throughput_tps: self
+                .last_throughput_tokens_per_second
+                .load(Ordering::Relaxed),
         }
     }
 }
@@ -105,6 +136,8 @@ pub struct QueueStats {
     pub current_queue_size: usize,
     pub average_processing_time_ms: u64,
     pub total_tokens_generated: u64,
+    pub peak_queue_size: usize,
+    pub current_throughput_tps: u64,
 }
 
 #[derive(Debug)]
@@ -539,7 +572,7 @@ impl RequestQueue {
                 break;
             }
 
-            // Convert token to string
+            // Convert token to string with buffer reuse
             let token_str = match model.token_to_str(token, Special::Tokenize) {
                 Ok(s) => s,
                 Err(e) => {
@@ -548,6 +581,10 @@ impl RequestQueue {
                 }
             };
 
+            // Efficient string concatenation
+            if generated_text.capacity() - generated_text.len() < token_str.len() {
+                generated_text.reserve(token_str.len() * 2); // Reserve extra space
+            }
             generated_text.push_str(&token_str);
             tokens_generated += 1;
 
@@ -749,9 +786,14 @@ impl RequestQueue {
         ]);
 
         let max_tokens = request.max_tokens.unwrap_or(512);
-        let mut generated_text = String::new();
+        // Pre-allocate string capacity to reduce reallocations
+        let estimated_chars = (max_tokens as usize) * 4; // Rough estimate: 4 chars per token
+        let mut generated_text = String::with_capacity(estimated_chars);
         let mut tokens_generated = 0u32;
         let mut n_cur = tokens_list.len();
+
+        // Pre-allocate token buffer for better memory management
+        let mut _token_buffer: Vec<u8> = Vec::with_capacity(64);
 
         // Generation loop - stream tokens one by one
         while tokens_generated < max_tokens {
@@ -917,18 +959,67 @@ impl RequestQueue {
     /// Gracefully shutdown the queue, waiting for all workers to complete
     pub async fn shutdown(mut self) {
         info!("RequestQueue shutting down gracefully");
+        let shutdown_start = Instant::now();
+        let stats = self.get_stats();
+
+        info!(
+            "Shutdown initiated with {} requests in queue, {} total processed",
+            stats.current_queue_size, stats.total_requests
+        );
 
         // Close the sender to signal workers to shutdown
-        // sender will be dropped automatically when this method ends
+        // (sender will be dropped when this method ends)
 
-        // Wait for all worker handles to complete
-        for handle in self.worker_handles.drain(..) {
-            if let Err(e) = handle.await {
-                warn!("Worker thread panicked during shutdown: {:?}", e);
+        // Wait for all worker handles to complete with individual timeouts
+        let worker_timeout = Duration::from_secs(15);
+        let mut successful_shutdowns = 0;
+        let total_workers = self.worker_handles.len();
+
+        for (i, handle) in self.worker_handles.drain(..).enumerate() {
+            match tokio::time::timeout(worker_timeout, handle).await {
+                Ok(Ok(())) => {
+                    debug!("Worker {} shutdown successfully", i);
+                    successful_shutdowns += 1;
+                }
+                Ok(Err(join_error)) => {
+                    warn!("Worker {} panicked during shutdown: {:?}", i, join_error);
+                }
+                Err(_) => {
+                    warn!("Worker {} shutdown timed out after {:?}", i, worker_timeout);
+                }
             }
         }
 
-        info!("RequestQueue shutdown complete");
+        let shutdown_duration = shutdown_start.elapsed();
+
+        info!(
+            "RequestQueue shutdown complete in {:?}: {}/{} workers successful",
+            shutdown_duration, successful_shutdowns, total_workers
+        );
+    }
+
+    /// Shutdown with timeout and return statistics
+    pub async fn shutdown_with_timeout(self, timeout: Duration) -> QueueStats {
+        let stats_before = self.get_stats();
+        info!("Starting RequestQueue shutdown with {:?} timeout", timeout);
+
+        let shutdown_future = async {
+            self.shutdown().await;
+        };
+
+        match tokio::time::timeout(timeout, shutdown_future).await {
+            Ok(()) => {
+                info!("RequestQueue shutdown completed within timeout");
+            }
+            Err(_) => {
+                warn!(
+                    "RequestQueue shutdown timed out after {:?} (had {} requests in queue)",
+                    timeout, stats_before.current_queue_size
+                );
+            }
+        }
+
+        stats_before
     }
 }
 

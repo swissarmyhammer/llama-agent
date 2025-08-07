@@ -1,8 +1,8 @@
 //! Performance Optimization Examples
-//! 
+//!
 //! This example demonstrates various performance optimization techniques
 //! for the llama-agent system, including:
-//! 
+//!
 //! - Model loading optimization
 //! - Batch processing strategies
 //! - Memory usage optimization
@@ -26,7 +26,7 @@ use tracing::info;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     tracing_subscriber::fmt::init();
-    
+
     info!("Starting performance optimization examples");
 
     println!("Performance Optimization Examples");
@@ -34,19 +34,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 1: Configuration optimization
     demonstrate_configuration_optimization().await?;
-    
+
     // Example 2: Batch processing
     demonstrate_batch_processing().await?;
-    
+
     // Example 3: Memory optimization
     demonstrate_memory_optimization().await?;
-    
+
     // Example 4: Concurrent processing
     demonstrate_concurrent_processing().await?;
-    
+
     // Example 5: Streaming performance
     demonstrate_streaming_performance().await?;
-    
+
     // Example 6: Benchmark different configurations
     benchmark_configurations().await?;
 
@@ -69,21 +69,21 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
                 repo: "microsoft/DialoGPT-medium".to_string(),
                 filename: None,
             },
-            batch_size: 1024,  // Large batch for throughput
+            batch_size: 1024, // Large batch for throughput
             use_hf_params: true,
         },
         queue_config: QueueConfig {
-            max_queue_size: 1000,  // Large queue
-            request_timeout: Duration::from_secs(180),  // Generous timeout
-            worker_threads: 1,  // Single worker for memory efficiency
+            max_queue_size: 1000,                      // Large queue
+            request_timeout: Duration::from_secs(180), // Generous timeout
+            worker_threads: 1,                         // Single worker for memory efficiency
         },
-        mcp_servers: vec![],  // Minimal MCP servers
+        mcp_servers: vec![], // Minimal MCP servers
         session_config: SessionConfig {
-            max_sessions: 10000,  // High session limit
-            session_timeout: Duration::from_secs(1800),  // 30 minutes
+            max_sessions: 10000,                        // High session limit
+            session_timeout: Duration::from_secs(1800), // 30 minutes
         },
     };
-    
+
     print_config_summary("High Throughput", &high_throughput_config);
 
     // Low-latency configuration
@@ -94,21 +94,21 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
                 folder: std::path::PathBuf::from("./models/fast"),
                 filename: Some("small-model.gguf".to_string()),
             },
-            batch_size: 256,  // Smaller batch for faster response
-            use_hf_params: false,  // Skip network calls
+            batch_size: 256,      // Smaller batch for faster response
+            use_hf_params: false, // Skip network calls
         },
         queue_config: QueueConfig {
-            max_queue_size: 100,  // Smaller queue
-            request_timeout: Duration::from_secs(30),  // Tight timeout
+            max_queue_size: 100,                      // Smaller queue
+            request_timeout: Duration::from_secs(30), // Tight timeout
             worker_threads: 1,
         },
-        mcp_servers: vec![],  // No MCP for minimal latency
+        mcp_servers: vec![], // No MCP for minimal latency
         session_config: SessionConfig {
             max_sessions: 1000,
-            session_timeout: Duration::from_secs(600),  // 10 minutes
+            session_timeout: Duration::from_secs(600), // 10 minutes
         },
     };
-    
+
     print_config_summary("Low Latency", &low_latency_config);
 
     // Memory-efficient configuration
@@ -116,24 +116,24 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
     let memory_efficient_config = AgentConfig {
         model: ModelConfig {
             source: ModelSource::HuggingFace {
-                repo: "microsoft/DialoGPT-small".to_string(),  // Smaller model
+                repo: "microsoft/DialoGPT-small".to_string(), // Smaller model
                 filename: None,
             },
-            batch_size: 128,  // Small batch size
+            batch_size: 128, // Small batch size
             use_hf_params: true,
         },
         queue_config: QueueConfig {
-            max_queue_size: 50,  // Small queue
+            max_queue_size: 50, // Small queue
             request_timeout: Duration::from_secs(60),
             worker_threads: 1,
         },
         mcp_servers: vec![],
         session_config: SessionConfig {
-            max_sessions: 100,  // Low session count
-            session_timeout: Duration::from_secs(300),  // 5 minutes
+            max_sessions: 100,                         // Low session count
+            session_timeout: Duration::from_secs(300), // 5 minutes
         },
     };
-    
+
     print_config_summary("Memory Efficient", &memory_efficient_config);
 
     Ok(())
@@ -172,21 +172,29 @@ async fn demonstrate_batch_processing() -> Result<(), Box<dyn std::error::Error>
 
     println!("\nSimulated batch processing metrics:");
     println!("Requests: {}", requests.len());
-    
+
     // Sequential timing
     let sequential_time = Duration::from_millis(requests.len() as u64 * 2000); // 2s per request
-    println!("Sequential processing: {:.1}s", sequential_time.as_secs_f32());
-    
+    println!(
+        "Sequential processing: {:.1}s",
+        sequential_time.as_secs_f32()
+    );
+
     // Concurrent timing
     let concurrent_time = Duration::from_millis(2000); // All at once, limited by longest
-    println!("Concurrent processing: {:.1}s", concurrent_time.as_secs_f32());
-    
+    println!(
+        "Concurrent processing: {:.1}s",
+        concurrent_time.as_secs_f32()
+    );
+
     // Batched timing
     let batched_time = Duration::from_millis(3000); // Batch overhead but efficient
     println!("Batched processing: {:.1}s", batched_time.as_secs_f32());
-    
-    println!("Throughput improvement: {:.1}x", 
-        sequential_time.as_secs_f32() / batched_time.as_secs_f32());
+
+    println!(
+        "Throughput improvement: {:.1}x",
+        sequential_time.as_secs_f32() / batched_time.as_secs_f32()
+    );
 
     Ok(())
 }
@@ -228,9 +236,11 @@ async fn demonstrate_memory_optimization() -> Result<(), Box<dyn std::error::Err
     for (name, size_mb) in model_sizes {
         let batch_overhead = 50; // MB per batch
         let session_overhead = 10; // MB per 100 sessions
-        
-        println!("  {}: ~{}MB + {}MB/batch + {}MB/100sessions", 
-            name, size_mb, batch_overhead, session_overhead);
+
+        println!(
+            "  {}: ~{}MB + {}MB/batch + {}MB/100sessions",
+            name, size_mb, batch_overhead, session_overhead
+        );
     }
 
     println!("\nMemory optimization tips:");
@@ -250,13 +260,16 @@ async fn demonstrate_concurrent_processing() -> Result<(), Box<dyn std::error::E
 
     // Simulate concurrent request handling
     println!("\nConcurrency patterns:");
-    
+
     println!("\n• Semaphore-based limiting:");
     println!("  - Limit concurrent requests to prevent overload");
     println!("  - Good for protecting shared resources");
-    
+
     let semaphore = Arc::new(Semaphore::new(3)); // Max 3 concurrent
-    println!("  Example: Max {} concurrent requests", semaphore.available_permits());
+    println!(
+        "  Example: Max {} concurrent requests",
+        semaphore.available_permits()
+    );
 
     println!("\n• Queue-based processing:");
     println!("  - Built into llama-agent RequestQueue");
@@ -334,7 +347,10 @@ async fn demonstrate_streaming_performance() -> Result<(), Box<dyn std::error::E
     let tokens_per_second = 25.0;
     let total_time = token_count as f32 / tokens_per_second;
 
-    println!("\nPerformance Simulation ({} tokens at {} tok/s):", token_count, tokens_per_second);
+    println!(
+        "\nPerformance Simulation ({} tokens at {} tok/s):",
+        token_count, tokens_per_second
+    );
     println!("  Streaming TTFT: 0.1s");
     println!("  Streaming Total: {:.1}s", total_time);
     println!("  Batch TTFT: {:.1}s", total_time);
@@ -358,14 +374,21 @@ async fn benchmark_configurations() -> Result<(), Box<dyn std::error::Error>> {
         ("Concurrent", 256, 2, Duration::from_secs(45), 35.0),
     ];
 
-    println!("\n{:<15} {:<10} {:<8} {:<12} {:<12}", 
-        "Config", "Batch", "Workers", "Timeout", "Tok/s");
+    println!(
+        "\n{:<15} {:<10} {:<8} {:<12} {:<12}",
+        "Config", "Batch", "Workers", "Timeout", "Tok/s"
+    );
     println!("{}", "-".repeat(60));
 
     for (name, batch_size, workers, timeout, tokens_per_sec) in configs {
-        println!("{:<15} {:<10} {:<8} {:<12} {:<12.1}", 
-            name, batch_size, workers, 
-            format!("{}s", timeout.as_secs()), tokens_per_sec);
+        println!(
+            "{:<15} {:<10} {:<8} {:<12} {:<12.1}",
+            name,
+            batch_size,
+            workers,
+            format!("{}s", timeout.as_secs()),
+            tokens_per_sec
+        );
     }
 
     println!("\nBenchmarking Methodology:");
@@ -394,7 +417,10 @@ fn print_config_summary(name: &str, config: &AgentConfig) {
     println!("    Batch size: {}", config.model.batch_size);
     println!("    Queue size: {}", config.queue_config.max_queue_size);
     println!("    Worker threads: {}", config.queue_config.worker_threads);
-    println!("    Request timeout: {}s", config.queue_config.request_timeout.as_secs());
+    println!(
+        "    Request timeout: {}s",
+        config.queue_config.request_timeout.as_secs()
+    );
     println!("    Max sessions: {}", config.session_config.max_sessions);
     println!("    MCP servers: {}", config.mcp_servers.len());
 }
@@ -406,10 +432,10 @@ async fn benchmark_real_performance(
     iterations: usize,
 ) -> Result<BenchmarkResults, Box<dyn std::error::Error>> {
     let mut results = BenchmarkResults::default();
-    
+
     for i in 0..iterations {
         let start = Instant::now();
-        
+
         for prompt in &test_prompts {
             let mut session = agent.create_session().await?;
             session.messages.push(Message {
@@ -419,7 +445,7 @@ async fn benchmark_real_performance(
                 tool_name: None,
                 timestamp: SystemTime::now(),
             });
-            
+
             let request = GenerationRequest {
                 session,
                 max_tokens: Some(100),
@@ -427,15 +453,15 @@ async fn benchmark_real_performance(
                 top_p: Some(0.9),
                 stop_tokens: vec![],
             };
-            
+
             let response = agent.generate(request).await?;
             results.total_tokens += response.tokens_generated;
         }
-        
+
         results.total_time += start.elapsed();
         results.iterations = i + 1;
     }
-    
+
     results.calculate_averages();
     Ok(results)
 }

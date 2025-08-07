@@ -1,5 +1,5 @@
 //! Streaming response example
-//! 
+//!
 //! This example demonstrates how to use the streaming API to get real-time token-by-token
 //! responses from the model, which is useful for interactive applications and better user experience.
 
@@ -19,7 +19,7 @@ use tracing::{info, warn};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     tracing_subscriber::fmt::init();
-    
+
     info!("Starting streaming response example");
 
     // Create agent configuration for streaming
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Initializing agent for streaming...");
     let agent = AgentServer::initialize(config).await?;
-    
+
     // Create a session
     let mut session = agent.create_session().await?;
     info!("Created session: {}", session.id);
@@ -72,11 +72,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get streaming response
     let mut stream = agent.generate_stream(request).await?;
-    
+
     let mut token_count = 0;
     let mut full_response = String::new();
     let start_time = std::time::Instant::now();
-    
+
     // Process each chunk as it arrives
     while let Some(chunk_result) = stream.next().await {
         match chunk_result {
@@ -84,11 +84,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Print the new text immediately (real-time streaming)
                 print!("{}", chunk.text);
                 io::stdout().flush()?; // Ensure immediate output
-                
+
                 // Accumulate for final statistics
                 full_response.push_str(&chunk.text);
                 token_count += chunk.token_count;
-                
+
                 // Check if generation is complete
                 if chunk.is_complete {
                     println!("\n{}", "=".repeat(60));
@@ -103,22 +103,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    
+
     let elapsed = start_time.elapsed();
-    
+
     // Display final statistics
     println!("\nStreaming Statistics:");
     println!("  Total tokens: {}", token_count);
     println!("  Total time: {:.2}s", elapsed.as_secs_f32());
     if token_count > 0 {
-        println!("  Tokens per second: {:.1}", token_count as f32 / elapsed.as_secs_f32());
+        println!(
+            "  Tokens per second: {:.1}",
+            token_count as f32 / elapsed.as_secs_f32()
+        );
     }
     println!("  Response length: {} characters", full_response.len());
-    
+
     // Demonstrate the difference between streaming and batch generation
     println!("\n{}", "=".repeat(60));
     println!("Comparing with batch generation for the same prompt...");
-    
+
     // Create a new session with the same message
     let mut batch_session = agent.create_session().await?;
     batch_session.messages.push(Message {
@@ -128,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tool_name: None,
         timestamp: SystemTime::now(),
     });
-    
+
     let batch_request = GenerationRequest {
         session: batch_session,
         max_tokens: Some(500),
@@ -136,16 +139,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         top_p: Some(0.9),
         stop_tokens: vec![],
     };
-    
+
     let batch_start = std::time::Instant::now();
     let batch_response = agent.generate(batch_request).await?;
     let batch_elapsed = batch_start.elapsed();
-    
+
     println!("\nBatch response received all at once:");
     println!("{}", "=".repeat(60));
     println!("{}", batch_response.generated_text);
     println!("{}", "=".repeat(60));
-    
+
     // Compare performance characteristics
     println!("\nPerformance Comparison:");
     println!("Streaming:");
@@ -153,13 +156,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Time: {:.2}s", elapsed.as_secs_f32());
     println!("  Time to first token: <1s (immediate)");
     println!("  User experience: Real-time, progressive");
-    
+
     println!("\nBatch:");
     println!("  Tokens: {}", batch_response.tokens_generated);
     println!("  Time: {:.2}s", batch_elapsed.as_secs_f32());
-    println!("  Time to first token: {:.2}s (wait for complete)", batch_elapsed.as_secs_f32());
+    println!(
+        "  Time to first token: {:.2}s (wait for complete)",
+        batch_elapsed.as_secs_f32()
+    );
     println!("  User experience: All-at-once, wait then complete");
-    
+
     // Show use case recommendations
     println!("\nUse Case Recommendations:");
     println!("Streaming is better for:");
@@ -167,7 +173,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  - Long-form content generation");
     println!("  - Real-time user feedback");
     println!("  - Better perceived performance");
-    
+
     println!("\nBatch is better for:");
     println!("  - API endpoints with complete responses");
     println!("  - Post-processing of complete text");

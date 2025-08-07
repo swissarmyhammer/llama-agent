@@ -1,5 +1,5 @@
 //! Tool workflow example demonstrating manual tool call handling
-//! 
+//!
 //! This example shows the detailed tool call workflow from the specification:
 //! - Extract tool calls from generated text
 //! - Execute tool calls individually  
@@ -21,7 +21,7 @@ use tracing::{info, warn};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     tracing_subscriber::fmt::init();
-    
+
     info!("Starting tool workflow example");
 
     let config = AgentConfig {
@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let agent = AgentServer::initialize(config).await?;
     let mut session = agent.create_session().await?;
-    
+
     // Configure MCP servers for the session
     session.mcp_servers = vec![MCPServerConfig {
         name: "filesystem".to_string(),
@@ -96,22 +96,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match response.finish_reason {
         FinishReason::ToolCall => {
             println!("Model wants to call tools!");
-            println!("Generated text with tool calls:\n{}", response.generated_text);
-            
+            println!(
+                "Generated text with tool calls:\n{}",
+                response.generated_text
+            );
+
             // Create a chat template engine to extract tool calls manually
             let chat_engine = ChatTemplateEngine::new();
-            
+
             // Extract tool calls from the generated text
             match chat_engine.extract_tool_calls(&response.generated_text) {
                 Ok(tool_calls) => {
                     println!("\nExtracted {} tool calls:", tool_calls.len());
-                    
+
                     for (i, tool_call) in tool_calls.iter().enumerate() {
                         println!("  {}. Tool: {}", i + 1, tool_call.name);
                         println!("     ID: {}", tool_call.id);
                         println!("     Arguments: {}", tool_call.arguments);
                     }
-                    
+
                     // Add assistant's message with tool calls to session
                     session.messages.push(Message {
                         role: MessageRole::Assistant,
@@ -120,11 +123,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tool_name: None,
                         timestamp: SystemTime::now(),
                     });
-                    
+
                     // Execute each tool call
                     for tool_call in tool_calls {
                         println!("\nExecuting tool call: {}", tool_call.name);
-                        
+
                         match agent.execute_tool(tool_call.clone(), &session).await {
                             Ok(tool_result) => {
                                 println!("Tool result for '{}': Success", tool_call.name);
@@ -133,14 +136,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 } else {
                                     println!("  Result: {}", tool_result.result);
                                 }
-                                
+
                                 // Add tool result to session
                                 let tool_content = if let Some(error) = &tool_result.error {
                                     format!("Error: {}", error)
                                 } else {
                                     serde_json::to_string(&tool_result.result)?
                                 };
-                                
+
                                 session.messages.push(Message {
                                     role: MessageRole::Tool,
                                     content: tool_content,
@@ -151,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             Err(e) => {
                                 warn!("Tool call execution failed: {}", e);
-                                
+
                                 // Add error result to session
                                 session.messages.push(Message {
                                     role: MessageRole::Tool,
@@ -163,7 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
-                    
+
                     // Generate final response incorporating tool results
                     let final_request = GenerationRequest {
                         session: session.clone(),
@@ -172,14 +175,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         top_p: Some(0.9),
                         stop_tokens: vec![],
                     };
-                    
+
                     println!("\nGenerating final response with tool results...");
                     let final_response = agent.generate(final_request).await?;
                     println!("Final response:");
                     println!("{}", final_response.generated_text);
-                    
+
                     println!("\nFinal Statistics:");
-                    println!("  Total tokens: {}", response.tokens_generated + final_response.tokens_generated);
+                    println!(
+                        "  Total tokens: {}",
+                        response.tokens_generated + final_response.tokens_generated
+                    );
                     println!("  Messages in session: {}", session.messages.len());
                 }
                 Err(e) => {

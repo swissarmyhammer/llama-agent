@@ -1,8 +1,8 @@
 //! Basic usage example from the specification
-//! 
-//! This example demonstrates the complete system functionality as outlined in 
+//!
+//! This example demonstrates the complete system functionality as outlined in
 //! specifications/index.md lines 605-709. It shows:
-//! 
+//!
 //! - AgentConfig setup with HuggingFace model loading
 //! - Session creation with MCP server configuration
 //! - Tool discovery and integration
@@ -24,7 +24,7 @@ use tracing::{error, info};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     tracing_subscriber::fmt::init();
-    
+
     info!("Starting basic usage example");
 
     // Create agent configuration exactly as shown in the specification
@@ -75,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Discover available tools from MCP servers
     agent.discover_tools(&mut session).await?;
     info!("Available tools: {:#?}", session.available_tools);
-    
+
     for tool in &session.available_tools {
         println!("  - {}: {}", tool.name, tool.description);
     }
@@ -106,15 +106,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         FinishReason::ToolCall => {
             info!("Model wants to call tools!");
             println!("Model wants to call tools!");
-            
+
             // Extract tool calls from the generated text
             // Note: The ChatTemplateEngine is used internally by AgentServer.generate()
             // The tool call extraction and execution is handled automatically in the generate() method
             // This example shows the conceptual flow, but the actual implementation is handled internally
-            
+
             println!("Generated text with tool calls:");
             println!("{}", response.generated_text);
-            
+
             // The tool calls have already been processed by the generate() method
             // and the response includes the final result after tool execution
         }
