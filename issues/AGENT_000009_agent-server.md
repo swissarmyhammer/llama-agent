@@ -50,3 +50,46 @@ Implement the main AgentServer struct that ties together all components and prov
 - Tool discovery and execution integrate seamlessly
 - Health checks provide meaningful status information
 - Proper cleanup on shutdown
+
+## Proposed Solution
+
+Based on the existing codebase architecture, I will implement the AgentServer as the main orchestrator that ties together all components:
+
+### AgentServer Design
+1. **Structure**: Create AgentServer struct that holds instances of:
+   - ModelManager (for model loading and inference)
+   - RequestQueue (for handling concurrent requests)
+   - SessionManager (for session lifecycle)
+   - MCPClient (for tool discovery and execution)
+   - ChatTemplateEngine (for prompt templating)
+
+2. **Initialization Flow**:
+   - Validate configuration with AgentConfig::validate()
+   - Initialize ModelManager and load model
+   - Create RequestQueue with model reference
+   - Initialize SessionManager 
+   - Setup MCPClient with configured servers
+   - Initialize ChatTemplateEngine
+
+3. **Request Processing**:
+   - Accept GenerationRequest with session
+   - Use ChatTemplateEngine to render session messages into model input
+   - Submit to RequestQueue for inference
+   - Parse response for tool calls
+   - Execute tools via MCPClient if needed
+   - Return final response
+
+4. **Component Integration**:
+   - Proper error propagation between components
+   - Resource cleanup on shutdown
+   - Health checking across all components
+   - Session management with tool discovery
+
+5. **Implementation Strategy**:
+   - Use Test-Driven Development
+   - Start with basic structure and initialization
+   - Add method implementations incrementally
+   - Focus on integration points between components
+   - Add comprehensive error handling
+
+This approach leverages all the existing, well-tested components while providing a clean, unified interface through the AgentAPI trait.
