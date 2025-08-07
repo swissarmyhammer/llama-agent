@@ -1,16 +1,91 @@
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::time::{Duration, SystemTime};
-use thiserror::Error;
 use async_trait::async_trait;
 use futures::Stream;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::pin::Pin;
+use std::time::{Duration, SystemTime};
+use thiserror::Error;
+use ulid::Ulid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SessionId(Ulid);
+
+impl SessionId {
+    pub fn new() -> Self {
+        Self(Ulid::new())
+    }
+
+    pub fn from_ulid(ulid: Ulid) -> Self {
+        Self(ulid)
+    }
+
+    pub fn as_ulid(&self) -> Ulid {
+        self.0
+    }
+}
+
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for SessionId {
+    type Err = ulid::DecodeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Ulid::from_string(s)?))
+    }
+}
+
+impl Default for SessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ToolCallId(Ulid);
+
+impl ToolCallId {
+    pub fn new() -> Self {
+        Self(Ulid::new())
+    }
+
+    pub fn from_ulid(ulid: Ulid) -> Self {
+        Self(ulid)
+    }
+
+    pub fn as_ulid(&self) -> Ulid {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ToolCallId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for ToolCallId {
+    type Err = ulid::DecodeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Ulid::from_string(s)?))
+    }
+}
+
+impl Default for ToolCallId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: MessageRole,
     pub content: String,
-    pub tool_call_id: Option<String>,
+    pub tool_call_id: Option<ToolCallId>,
     pub tool_name: Option<String>,
     pub timestamp: SystemTime,
 }
@@ -27,7 +102,7 @@ impl MessageRole {
     pub fn as_str(&self) -> &'static str {
         match self {
             MessageRole::System => "system",
-            MessageRole::User => "user", 
+            MessageRole::User => "user",
             MessageRole::Assistant => "assistant",
             MessageRole::Tool => "tool",
         }
@@ -36,7 +111,7 @@ impl MessageRole {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
-    pub id: String,
+    pub id: SessionId,
     pub messages: Vec<Message>,
     pub mcp_servers: Vec<MCPServerConfig>,
     pub available_tools: Vec<ToolDefinition>,
@@ -87,14 +162,14 @@ pub enum FinishReason {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
-    pub id: String,
+    pub id: ToolCallId,
     pub name: String,
     pub arguments: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
-    pub call_id: String,
+    pub call_id: ToolCallId,
     pub result: serde_json::Value,
     pub error: Option<String>,
 }
@@ -123,8 +198,14 @@ pub struct ModelConfig {
 
 #[derive(Debug, Clone)]
 pub enum ModelSource {
-    HuggingFace { repo: String, filename: Option<String> },
-    Local { folder: PathBuf, filename: Option<String> },
+    HuggingFace {
+        repo: String,
+        filename: Option<String>,
+    },
+    Local {
+        folder: PathBuf,
+        filename: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -163,22 +244,22 @@ pub struct HealthStatus {
 pub enum AgentError {
     #[error("Model error: {0}")]
     Model(#[from] ModelError),
-    
+
     #[error("Queue error: {0}")]
     Queue(#[from] QueueError),
-    
+
     #[error("Session error: {0}")]
     Session(#[from] SessionError),
-    
+
     #[error("MCP error: {0}")]
     MCP(#[from] MCPError),
-    
+
     #[error("Template error: {0}")]
     Template(#[from] TemplateError),
-    
+
     #[error("Timeout: request took longer than {timeout:?}")]
     Timeout { timeout: Duration },
-    
+
     #[error("Queue full: maximum capacity {capacity} exceeded")]
     QueueFull { capacity: usize },
 }
@@ -187,13 +268,13 @@ pub enum AgentError {
 pub enum ModelError {
     #[error("Model loading failed: {0}")]
     LoadingFailed(String),
-    
+
     #[error("Model not found at source: {0}")]
     NotFound(String),
-    
+
     #[error("Invalid model configuration: {0}")]
     InvalidConfig(String),
-    
+
     #[error("Model inference failed: {0}")]
     InferenceFailed(String),
 }
@@ -202,10 +283,10 @@ pub enum ModelError {
 pub enum QueueError {
     #[error("Queue is full")]
     Full,
-    
+
     #[error("Request timeout")]
     Timeout,
-    
+
     #[error("Worker thread error: {0}")]
     WorkerError(String),
 }
@@ -214,13 +295,13 @@ pub enum QueueError {
 pub enum SessionError {
     #[error("Session not found: {0}")]
     NotFound(String),
-    
+
     #[error("Session limit exceeded")]
     LimitExceeded,
-    
+
     #[error("Session timeout")]
     Timeout,
-    
+
     #[error("Invalid session state: {0}")]
     InvalidState(String),
 }
@@ -229,13 +310,13 @@ pub enum SessionError {
 pub enum MCPError {
     #[error("MCP server not found: {0}")]
     ServerNotFound(String),
-    
+
     #[error("Tool call failed: {0}")]
     ToolCallFailed(String),
-    
+
     #[error("Connection error: {0}")]
     Connection(String),
-    
+
     #[error("Protocol error: {0}")]
     Protocol(String),
 }
@@ -244,10 +325,10 @@ pub enum MCPError {
 pub enum TemplateError {
     #[error("Template rendering failed: {0}")]
     RenderingFailed(String),
-    
+
     #[error("Tool call parsing failed: {0}")]
     ToolCallParsing(String),
-    
+
     #[error("Invalid template: {0}")]
     Invalid(String),
 }
@@ -258,24 +339,28 @@ pub trait AgentAPI {
     async fn initialize(config: AgentConfig) -> Result<Self, AgentError>
     where
         Self: Sized;
-    
+
     async fn generate(&self, request: GenerationRequest) -> Result<GenerationResponse, AgentError>;
-    
+
     async fn generate_stream(
-        &self, 
-        request: GenerationRequest
+        &self,
+        request: GenerationRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, AgentError>> + Send>>, AgentError>;
-    
+
     async fn create_session(&self) -> Result<Session, AgentError>;
-    
-    async fn get_session(&self, session_id: &str) -> Result<Option<Session>, AgentError>;
-    
+
+    async fn get_session(&self, session_id: &SessionId) -> Result<Option<Session>, AgentError>;
+
     async fn update_session(&self, session: Session) -> Result<(), AgentError>;
-    
+
     async fn discover_tools(&self, session: &mut Session) -> Result<(), AgentError>;
-    
-    async fn execute_tool(&self, tool_call: ToolCall, session: &Session) -> Result<ToolResult, AgentError>;
-    
+
+    async fn execute_tool(
+        &self,
+        tool_call: ToolCall,
+        session: &Session,
+    ) -> Result<ToolResult, AgentError>;
+
     async fn health(&self) -> Result<HealthStatus, AgentError>;
 }
 
@@ -283,7 +368,7 @@ pub trait AgentAPI {
 mod tests {
     use super::*;
     use std::time::SystemTime;
-    
+
     #[test]
     fn test_message_role_as_str() {
         assert_eq!(MessageRole::System.as_str(), "system");
@@ -291,7 +376,7 @@ mod tests {
         assert_eq!(MessageRole::Assistant.as_str(), "assistant");
         assert_eq!(MessageRole::Tool.as_str(), "tool");
     }
-    
+
     #[test]
     fn test_message_creation() {
         let message = Message {
@@ -301,43 +386,46 @@ mod tests {
             tool_name: None,
             timestamp: SystemTime::now(),
         };
-        
+
         assert_eq!(message.role.as_str(), "user");
         assert_eq!(message.content, "Hello, world!");
         assert!(message.tool_call_id.is_none());
         assert!(message.tool_name.is_none());
     }
-    
+
     #[test]
     fn test_session_creation() {
         let session = Session {
-            id: "test-session".to_string(),
+            id: SessionId::new(),
             messages: Vec::new(),
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         };
-        
-        assert_eq!(session.id, "test-session");
+
+        assert!(!session.id.to_string().is_empty());
         assert!(session.messages.is_empty());
         assert!(session.mcp_servers.is_empty());
         assert!(session.available_tools.is_empty());
     }
-    
+
     #[test]
     fn test_mcp_server_config() {
         let config = MCPServerConfig {
             name: "filesystem".to_string(),
             command: "npx".to_string(),
-            args: vec!["-y".to_string(), "@modelcontextprotocol/server-filesystem".to_string()],
+            args: vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem".to_string(),
+            ],
         };
-        
+
         assert_eq!(config.name, "filesystem");
         assert_eq!(config.command, "npx");
         assert_eq!(config.args.len(), 2);
     }
-    
+
     #[test]
     fn test_tool_definition() {
         let tool = ToolDefinition {
@@ -346,22 +434,22 @@ mod tests {
             parameters: serde_json::json!({"type": "object"}),
             server_name: "filesystem".to_string(),
         };
-        
+
         assert_eq!(tool.name, "list_files");
         assert_eq!(tool.server_name, "filesystem");
     }
-    
+
     #[test]
     fn test_generation_request() {
         let session = Session {
-            id: "test".to_string(),
+            id: SessionId::new(),
             messages: Vec::new(),
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         };
-        
+
         let request = GenerationRequest {
             session,
             max_tokens: Some(100),
@@ -369,60 +457,62 @@ mod tests {
             top_p: Some(0.9),
             stop_tokens: vec!["</s>".to_string()],
         };
-        
+
         assert_eq!(request.max_tokens, Some(100));
         assert_eq!(request.temperature, Some(0.7));
         assert_eq!(request.stop_tokens.len(), 1);
     }
-    
+
     #[test]
     fn test_model_source_variants() {
         let hf_source = ModelSource::HuggingFace {
             repo: "microsoft/DialoGPT-medium".to_string(),
             filename: None,
         };
-        
+
         let local_source = ModelSource::Local {
             folder: PathBuf::from("/models/llama2"),
             filename: Some("model.gguf".to_string()),
         };
-        
+
         match hf_source {
             ModelSource::HuggingFace { repo, .. } => assert_eq!(repo, "microsoft/DialoGPT-medium"),
             _ => panic!("Wrong variant"),
         }
-        
+
         match local_source {
-            ModelSource::Local { filename, .. } => assert_eq!(filename, Some("model.gguf".to_string())),
+            ModelSource::Local { filename, .. } => {
+                assert_eq!(filename, Some("model.gguf".to_string()))
+            }
             _ => panic!("Wrong variant"),
         }
     }
-    
+
     #[test]
     fn test_finish_reason() {
-        let reasons = vec![
+        let reasons = [
             FinishReason::MaxTokens,
             FinishReason::StopToken,
             FinishReason::EndOfSequence,
             FinishReason::ToolCall,
             FinishReason::Error("test error".to_string()),
         ];
-        
+
         assert_eq!(reasons.len(), 5);
-        
+
         match &reasons[4] {
             FinishReason::Error(msg) => assert_eq!(msg, "test error"),
             _ => panic!("Wrong variant"),
         }
     }
-    
+
     #[test]
     fn test_session_config_default() {
         let config = SessionConfig::default();
         assert_eq!(config.max_sessions, 1000);
         assert_eq!(config.session_timeout, Duration::from_secs(3600));
     }
-    
+
     #[test]
     fn test_stream_chunk() {
         let chunk = StreamChunk {
@@ -430,24 +520,94 @@ mod tests {
             is_complete: false,
             token_count: 1,
         };
-        
+
         assert_eq!(chunk.text, "Hello");
         assert!(!chunk.is_complete);
         assert_eq!(chunk.token_count, 1);
     }
-    
+
     #[test]
     fn test_tool_call_serialization() {
         let tool_call = ToolCall {
-            id: "call_123".to_string(),
+            id: ToolCallId::new(),
             name: "list_files".to_string(),
             arguments: serde_json::json!({"path": "/tmp"}),
         };
-        
+
         let serialized = serde_json::to_string(&tool_call).unwrap();
         let deserialized: ToolCall = serde_json::from_str(&serialized).unwrap();
-        
-        assert_eq!(deserialized.id, "call_123");
+
+        assert_eq!(deserialized.id.to_string(), tool_call.id.to_string());
         assert_eq!(deserialized.name, "list_files");
+    }
+
+    #[test]
+    fn test_session_id() {
+        let session_id = SessionId::new();
+        let session_id_str = session_id.to_string();
+
+        // Test that we can parse back the string representation
+        let parsed_session_id: SessionId = session_id_str.parse().unwrap();
+        assert_eq!(session_id, parsed_session_id);
+
+        // Test serialization
+        let serialized = serde_json::to_string(&session_id).unwrap();
+        let deserialized: SessionId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(session_id, deserialized);
+
+        // Test Display trait
+        assert!(!format!("{}", session_id).is_empty());
+    }
+
+    #[test]
+    fn test_tool_call_id() {
+        let tool_call_id = ToolCallId::new();
+        let tool_call_id_str = tool_call_id.to_string();
+
+        // Test that we can parse back the string representation
+        let parsed_tool_call_id: ToolCallId = tool_call_id_str.parse().unwrap();
+        assert_eq!(tool_call_id, parsed_tool_call_id);
+
+        // Test serialization
+        let serialized = serde_json::to_string(&tool_call_id).unwrap();
+        let deserialized: ToolCallId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(tool_call_id, deserialized);
+
+        // Test Display trait
+        assert!(!format!("{}", tool_call_id).is_empty());
+    }
+
+    #[test]
+    fn test_message_with_tool_call() {
+        let tool_call_id = ToolCallId::new();
+        let message = Message {
+            role: MessageRole::Tool,
+            content: "Tool response content".to_string(),
+            tool_call_id: Some(tool_call_id),
+            tool_name: Some("test_tool".to_string()),
+            timestamp: SystemTime::now(),
+        };
+
+        assert_eq!(message.role.as_str(), "tool");
+        assert_eq!(message.tool_call_id, Some(tool_call_id));
+        assert_eq!(message.tool_name.as_ref().unwrap(), "test_tool");
+    }
+
+    #[test]
+    fn test_tool_result() {
+        let call_id = ToolCallId::new();
+        let result = ToolResult {
+            call_id,
+            result: serde_json::json!({"status": "success"}),
+            error: None,
+        };
+
+        assert_eq!(result.call_id, call_id);
+        assert!(result.error.is_none());
+
+        // Test serialization
+        let serialized = serde_json::to_string(&result).unwrap();
+        let deserialized: ToolResult = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.call_id, call_id);
     }
 }

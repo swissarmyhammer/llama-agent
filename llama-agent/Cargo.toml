@@ -23,7 +23,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 
 # Utilities
-uuid = { workspace = true }
+ulid = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
