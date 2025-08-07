@@ -18,7 +18,7 @@ use llama_agent::{
     AgentServer,
 };
 use std::time::{Duration, SystemTime};
-use tracing::{error, info};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -131,10 +131,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", response.generated_text);
         }
         FinishReason::Error(ref err) => {
-            error!("Generation completed with error: {}", err);
-            println!("Response with error:");
+            println!("❌ Generation completed with error: {}", err);
+            println!("Response with partial text:");
             println!("{}", response.generated_text);
-            println!("Error: {}", err);
         }
     }
 

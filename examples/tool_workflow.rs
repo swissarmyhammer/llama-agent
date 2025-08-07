@@ -189,8 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("  Messages in session: {}", session.messages.len());
                 }
                 Err(e) => {
-                    warn!("Failed to extract tool calls: {}", e);
-                    println!("Could not extract tool calls from response: {}", e);
+                    println!("❌ Could not extract tool calls from response: {}", e);
                     println!("Raw response: {}", response.generated_text);
                 }
             }

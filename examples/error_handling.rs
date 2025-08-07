@@ -21,6 +21,22 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 use tracing::{error, info, warn};
 
+// Constants for example configurations
+const DEFAULT_BATCH_SIZE: u32 = 512;
+const DEFAULT_TIMEOUT_SECS: u64 = 30;
+const EXTENDED_TIMEOUT_SECS: u64 = 60;
+const LONG_TIMEOUT_SECS: u64 = 120;
+const LARGE_MAX_TOKENS: u32 = 10000;
+const DEFAULT_MAX_TOKENS: u32 = 100;
+const CONSERVATIVE_BATCH_SIZE: u32 = 256;
+const LARGE_QUEUE_SIZE: usize = 1000;
+const DEFAULT_QUEUE_SIZE: usize = 100;
+const LARGE_SESSION_LIMIT: usize = 100;
+const GENEROUS_TIMEOUT_SECS: u64 = 300;
+const LONG_SESSION_TIMEOUT_SECS: u64 = 7200;
+const RETRY_INITIAL_DELAY_MS: u64 = 100;
+const MAX_RETRY_ATTEMPTS: usize = 5;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging to see error details
@@ -49,6 +65,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Example 6: Graceful degradation
     demonstrate_graceful_degradation().await?;
 
+    // Example 7: Retry with backoff pattern
+    demonstrate_retry_with_backoff().await?;
+
     println!("\n✓ All error handling examples completed");
     info!("Error handling examples completed");
     Ok(())
@@ -66,7 +85,7 @@ async fn demonstrate_invalid_model_config() -> Result<(), Box<dyn std::error::Er
                 repo: "invalid-repo-format".to_string(), // Missing org/repo format
                 filename: None,
             },
-            batch_size: 512,
+            batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: true,
         },
         queue_config: QueueConfig::default(),
@@ -87,7 +106,7 @@ async fn demonstrate_invalid_model_config() -> Result<(), Box<dyn std::error::Er
                 folder: PathBuf::from("/nonexistent/path"),
                 filename: None,
             },
-            batch_size: 512,
+            batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: false,
         },
         queue_config: QueueConfig::default(),
@@ -135,7 +154,7 @@ async fn demonstrate_mcp_server_failures() -> Result<(), Box<dyn std::error::Err
                 repo: "microsoft/DialoGPT-medium".to_string(),
                 filename: None,
             },
-            batch_size: 512,
+            batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: true,
         },
         queue_config: QueueConfig::default(),
@@ -203,7 +222,7 @@ async fn demonstrate_generation_errors() -> Result<(), Box<dyn std::error::Error
                 repo: "microsoft/DialoGPT-medium".to_string(),
                 filename: None,
             },
-            batch_size: 512,
+            batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: true,
         },
         queue_config: QueueConfig {
@@ -232,8 +251,8 @@ async fn demonstrate_generation_errors() -> Result<(), Box<dyn std::error::Error
 
             let request = GenerationRequest {
                 session,
-                max_tokens: Some(10000), // Very large token limit
-                temperature: Some(2.0),  // Extreme temperature
+                max_tokens: Some(LARGE_MAX_TOKENS), // Very large token limit
+                temperature: Some(2.0),             // Extreme temperature
                 top_p: Some(1.0),
                 stop_tokens: vec![],
             };
@@ -394,19 +413,23 @@ async fn demonstrate_graceful_degradation() -> Result<(), Box<dyn std::error::Er
     println!("            folder: PathBuf::from(\"./models/cached\"),");
     println!("            filename: Some(\"fallback-model.gguf\".to_string()),");
     println!("        }},");
-    println!("        batch_size: 256, // Conservative batch size");
+    println!("        batch_size: CONSERVATIVE_BATCH_SIZE, // Conservative batch size");
     println!("        use_hf_params: false, // Don't depend on network");
     println!("    }},");
     println!("    queue_config: QueueConfig {{");
-    println!("        request_timeout: Duration::from_secs(300), // Generous timeout");
-    println!("        max_queue_size: 1000, // Large queue for resilience");
+    println!(
+        "        request_timeout: Duration::from_secs(GENEROUS_TIMEOUT_SECS), // Generous timeout"
+    );
+    println!("        max_queue_size: LARGE_QUEUE_SIZE, // Large queue for resilience");
     println!("        worker_threads: 1, // Conservative threading");
     println!("    }},");
     println!("    // Only include essential MCP servers");
     println!("    mcp_servers: vec![essential_servers_only()],");
     println!("    session_config: SessionConfig {{");
-    println!("        session_timeout: Duration::from_secs(7200), // Long timeout");
-    println!("        max_sessions: 100, // Reasonable limit");
+    println!(
+        "        session_timeout: Duration::from_secs(LONG_SESSION_TIMEOUT_SECS), // Long timeout"
+    );
+    println!("        max_sessions: LARGE_SESSION_LIMIT, // Reasonable limit");
     println!("    }},");
     println!("}}");
     println!("```");
@@ -422,8 +445,53 @@ async fn demonstrate_graceful_degradation() -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
+async fn demonstrate_retry_with_backoff() -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n7. Retry with Backoff Pattern");
+    println!("{}", "-".repeat(40));
+
+    println!("Demonstrating retry logic with exponential backoff for transient failures:");
+
+    // Counter for simulation
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let attempt_counter = Arc::new(AtomicUsize::new(0));
+    let counter_clone = attempt_counter.clone();
+
+    // Simulate a flaky operation that succeeds on the 3rd attempt
+    let flaky_operation = move || {
+        let count = counter_clone.fetch_add(1, Ordering::SeqCst);
+        async move {
+            if count < 2 {
+                Err(format!("Transient failure #{}", count + 1))
+            } else {
+                Ok(format!("Success after {} attempts!", count + 1))
+            }
+        }
+    };
+
+    println!("\nAttempting flaky operation with retry...");
+    match retry_with_backoff(
+        flaky_operation,
+        MAX_RETRY_ATTEMPTS,                            // max retries
+        Duration::from_millis(RETRY_INITIAL_DELAY_MS), // initial delay
+    )
+    .await
+    {
+        Ok(result) => println!("✓ {}", result),
+        Err(e) => println!("❌ Final failure: {}", e),
+    }
+
+    println!("\nKey benefits of retry with backoff:");
+    println!("• Handles transient network/service failures");
+    println!("• Exponential backoff reduces load on failing services");
+    println!("• Configurable retry limits prevent infinite loops");
+    println!("• Jitter can be added to prevent thundering herd");
+
+    Ok(())
+}
+
 /// Demonstrates how to implement retry logic for transient failures
-#[allow(dead_code)]
 async fn retry_with_backoff<T, E, F, Fut>(
     mut operation: F,
     max_retries: usize,

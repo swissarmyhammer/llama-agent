@@ -13,7 +13,7 @@ use llama_agent::{
 };
 use std::io::{self, Write};
 use std::time::{Duration, SystemTime};
-use tracing::{info, warn};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -97,8 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Err(e) => {
-                warn!("Streaming error: {}", e);
-                println!("\nStreaming error: {}", e);
+                println!("\n❌ Streaming error: {}", e);
                 break;
             }
         }

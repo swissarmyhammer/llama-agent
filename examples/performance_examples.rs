@@ -22,6 +22,28 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::Semaphore;
 use tracing::info;
 
+// Constants for performance examples
+const SMALL_BATCH_SIZE: u32 = 128;
+const MEDIUM_BATCH_SIZE: u32 = 256;
+const DEFAULT_BATCH_SIZE: u32 = 512;
+const LARGE_BATCH_SIZE: u32 = 1024;
+const SMALL_QUEUE_SIZE: usize = 50;
+const DEFAULT_QUEUE_SIZE: usize = 100;
+const LARGE_QUEUE_SIZE: usize = 1000;
+const HIGH_THROUGHPUT_QUEUE_SIZE: usize = 1000;
+const DEFAULT_TIMEOUT_SECS: u64 = 30;
+const EXTENDED_TIMEOUT_SECS: u64 = 45;
+const MODERATE_TIMEOUT_SECS: u64 = 60;
+const LONG_TIMEOUT_SECS: u64 = 120;
+const GENEROUS_TIMEOUT_SECS: u64 = 180;
+const DEFAULT_MAX_TOKENS: u32 = 100;
+const SMALL_SESSION_LIMIT: usize = 100;
+const MODERATE_SESSION_LIMIT: usize = 1000;
+const HIGH_SESSION_LIMIT: usize = 10000;
+const SINGLE_WORKER: usize = 1;
+const DUAL_WORKERS: usize = 2;
+const BENCHMARK_ITERATIONS: usize = 10;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
@@ -69,13 +91,13 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
                 repo: "microsoft/DialoGPT-medium".to_string(),
                 filename: None,
             },
-            batch_size: 1024, // Large batch for throughput
+            batch_size: LARGE_BATCH_SIZE, // Large batch for throughput
             use_hf_params: true,
         },
         queue_config: QueueConfig {
-            max_queue_size: 1000,                      // Large queue
-            request_timeout: Duration::from_secs(180), // Generous timeout
-            worker_threads: 1,                         // Single worker for memory efficiency
+            max_queue_size: HIGH_THROUGHPUT_QUEUE_SIZE, // Large queue
+            request_timeout: Duration::from_secs(GENEROUS_TIMEOUT_SECS), // Generous timeout
+            worker_threads: 1,                          // Single worker for memory efficiency
         },
         mcp_servers: vec![], // Minimal MCP servers
         session_config: SessionConfig {
@@ -94,12 +116,12 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
                 folder: std::path::PathBuf::from("./models/fast"),
                 filename: Some("small-model.gguf".to_string()),
             },
-            batch_size: 256,      // Smaller batch for faster response
-            use_hf_params: false, // Skip network calls
+            batch_size: MEDIUM_BATCH_SIZE, // Smaller batch for faster response
+            use_hf_params: false,          // Skip network calls
         },
         queue_config: QueueConfig {
-            max_queue_size: 100,                      // Smaller queue
-            request_timeout: Duration::from_secs(30), // Tight timeout
+            max_queue_size: DEFAULT_QUEUE_SIZE, // Smaller queue
+            request_timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS), // Tight timeout
             worker_threads: 1,
         },
         mcp_servers: vec![], // No MCP for minimal latency
@@ -119,12 +141,12 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
                 repo: "microsoft/DialoGPT-small".to_string(), // Smaller model
                 filename: None,
             },
-            batch_size: 128, // Small batch size
+            batch_size: SMALL_BATCH_SIZE, // Small batch size
             use_hf_params: true,
         },
         queue_config: QueueConfig {
-            max_queue_size: 50, // Small queue
-            request_timeout: Duration::from_secs(60),
+            max_queue_size: SMALL_QUEUE_SIZE, // Small queue
+            request_timeout: Duration::from_secs(MODERATE_TIMEOUT_SECS),
             worker_threads: 1,
         },
         mcp_servers: vec![],
@@ -368,10 +390,34 @@ async fn benchmark_configurations() -> Result<(), Box<dyn std::error::Error>> {
     println!("(Note: These are simulated results for demonstration)");
 
     let configs = vec![
-        ("Small/Fast", 128, 1, Duration::from_secs(30), 45.0),
-        ("Medium/Balanced", 512, 1, Duration::from_secs(60), 28.0),
-        ("Large/Quality", 1024, 1, Duration::from_secs(120), 15.0),
-        ("Concurrent", 256, 2, Duration::from_secs(45), 35.0),
+        (
+            "Small/Fast",
+            SMALL_BATCH_SIZE,
+            SINGLE_WORKER,
+            Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            45.0,
+        ),
+        (
+            "Medium/Balanced",
+            DEFAULT_BATCH_SIZE,
+            SINGLE_WORKER,
+            Duration::from_secs(MODERATE_TIMEOUT_SECS),
+            28.0,
+        ),
+        (
+            "Large/Quality",
+            LARGE_BATCH_SIZE,
+            SINGLE_WORKER,
+            Duration::from_secs(LONG_TIMEOUT_SECS),
+            15.0,
+        ),
+        (
+            "Concurrent",
+            MEDIUM_BATCH_SIZE,
+            DUAL_WORKERS,
+            Duration::from_secs(EXTENDED_TIMEOUT_SECS),
+            35.0,
+        ),
     ];
 
     println!(
@@ -409,6 +455,9 @@ async fn benchmark_configurations() -> Result<(), Box<dyn std::error::Error>> {
     println!("  • Reliability: error rates, timeout rates");
     println!("  • Scalability: performance vs. load");
 
+    println!("\nFor real performance testing, see the benchmark_real_performance()");
+    println!("function below, which provides actual benchmarking against a running agent.");
+
     Ok(())
 }
 
@@ -425,7 +474,8 @@ fn print_config_summary(name: &str, config: &AgentConfig) {
     println!("    MCP servers: {}", config.mcp_servers.len());
 }
 
-#[allow(dead_code)]
+/// Real performance benchmarking function for testing against a running agent
+/// Call this function if you want to perform actual performance measurements
 async fn benchmark_real_performance(
     agent: &AgentServer,
     test_prompts: Vec<String>,
@@ -448,7 +498,7 @@ async fn benchmark_real_performance(
 
             let request = GenerationRequest {
                 session,
-                max_tokens: Some(100),
+                max_tokens: Some(DEFAULT_MAX_TOKENS),
                 temperature: Some(0.7),
                 top_p: Some(0.9),
                 stop_tokens: vec![],

@@ -15,6 +15,19 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 use tracing::{info, warn};
 
+// Constants for integration tests
+const DEFAULT_BATCH_SIZE: u32 = 512;
+const LARGE_BATCH_SIZE: u32 = 1024;
+const SMALL_BATCH_SIZE: u32 = 128;
+const MEDIUM_BATCH_SIZE: u32 = 256;
+const SMALL_QUEUE_SIZE: usize = 50;
+const DEFAULT_QUEUE_SIZE: usize = 100;
+const LARGE_QUEUE_SIZE: usize = 1000;
+const DEFAULT_MAX_TOKENS: u32 = 100;
+const SMALL_SESSION_LIMIT: usize = 100;
+const MODERATE_SESSION_LIMIT: usize = 1000;
+const HIGH_SESSION_LIMIT: usize = 10000;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging for test diagnostics
@@ -168,7 +181,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
                 repo: "microsoft/DialoGPT-medium".to_string(),
                 filename: None,
             },
-            batch_size: 512,
+            batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: true,
         },
         queue_config: QueueConfig::default(),
@@ -209,7 +222,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
                 repo: "invalid-repo".to_string(), // No org/repo format
                 filename: None,
             },
-            batch_size: 512,
+            batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: true,
         },
         queue_config: QueueConfig::default(),
@@ -230,7 +243,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
                 folder: temp_dir,
                 filename: None,
             },
-            batch_size: 512,
+            batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: false,
         },
         queue_config: QueueConfig::default(),
@@ -256,7 +269,7 @@ async fn test_agent_initialization() -> Result<(), Box<dyn std::error::Error>> {
                 folder: PathBuf::from("/nonexistent/path"),
                 filename: None,
             },
-            batch_size: 512,
+            batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: false,
         },
         queue_config: QueueConfig::default(),
@@ -515,13 +528,13 @@ async fn test_streaming_patterns() -> Result<(), Box<dyn std::error::Error>> {
 
     let generation_request = GenerationRequest {
         session,
-        max_tokens: Some(100),
+        max_tokens: Some(DEFAULT_MAX_TOKENS),
         temperature: Some(0.7),
         top_p: Some(0.9),
         stop_tokens: vec!["</s>".to_string()],
     };
 
-    if generation_request.max_tokens != Some(100) {
+    if generation_request.max_tokens != Some(DEFAULT_MAX_TOKENS) {
         return Err("Generation request should preserve max_tokens".into());
     }
 
@@ -540,17 +553,17 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
                 repo: "microsoft/DialoGPT-medium".to_string(),
                 filename: None,
             },
-            batch_size: 1024, // Large batch
+            batch_size: LARGE_BATCH_SIZE, // Large batch
             use_hf_params: true,
         },
         queue_config: QueueConfig {
-            max_queue_size: 1000, // Large queue
+            max_queue_size: LARGE_QUEUE_SIZE, // Large queue
             request_timeout: Duration::from_secs(180),
             worker_threads: 1,
         },
         mcp_servers: vec![],
         session_config: SessionConfig {
-            max_sessions: 10000, // High session limit
+            max_sessions: HIGH_SESSION_LIMIT, // High session limit
             session_timeout: Duration::from_secs(1800),
         },
     };
@@ -567,17 +580,17 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
                 repo: "microsoft/DialoGPT-small".to_string(), // Smaller model
                 filename: None,
             },
-            batch_size: 256, // Smaller batch
+            batch_size: MEDIUM_BATCH_SIZE, // Smaller batch
             use_hf_params: true,
         },
         queue_config: QueueConfig {
-            max_queue_size: 100,
+            max_queue_size: DEFAULT_QUEUE_SIZE,
             request_timeout: Duration::from_secs(30), // Tight timeout
             worker_threads: 1,
         },
         mcp_servers: vec![], // No MCP for minimal latency
         session_config: SessionConfig {
-            max_sessions: 1000,
+            max_sessions: MODERATE_SESSION_LIMIT,
             session_timeout: Duration::from_secs(600),
         },
     };
@@ -594,17 +607,17 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
                 repo: "microsoft/DialoGPT-small".to_string(),
                 filename: None,
             },
-            batch_size: 128, // Small batch
+            batch_size: SMALL_BATCH_SIZE, // Small batch
             use_hf_params: true,
         },
         queue_config: QueueConfig {
-            max_queue_size: 50, // Small queue
+            max_queue_size: SMALL_QUEUE_SIZE, // Small queue
             request_timeout: Duration::from_secs(60),
             worker_threads: 1,
         },
         mcp_servers: vec![],
         session_config: SessionConfig {
-            max_sessions: 100, // Low session count
+            max_sessions: SMALL_SESSION_LIMIT, // Low session count
             session_timeout: Duration::from_secs(300),
         },
     };

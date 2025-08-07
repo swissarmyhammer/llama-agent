@@ -403,22 +403,6 @@ impl ModelManager {
         }
     }
 
-    /// Get optimal thread count for inference
-    #[allow(dead_code)]
-    fn get_optimal_thread_count() -> u32 {
-        let logical_cores = std::thread::available_parallelism()
-            .map(|p| p.get() as u32)
-            .unwrap_or(4);
-
-        // Use 75% of available cores, minimum 1, maximum 16
-        let optimal = ((logical_cores * 3) / 4).clamp(1, 16);
-        debug!(
-            "Detected {} logical cores, using {} threads for inference",
-            logical_cores, optimal
-        );
-        optimal
-    }
-
     /// Get estimated memory usage of the loaded model in bytes
     pub fn get_memory_usage_bytes(&self) -> u64 {
         self.memory_usage_bytes
