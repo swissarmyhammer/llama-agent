@@ -1,16 +1,17 @@
 use anyhow::Result;
 use clap::Parser;
 use llama_agent::{
-    model::ModelManager,
-    queue::RequestQueue,
-    session::SessionManager,
     types::{
-        GenerationRequest, Message, MessageRole, ModelConfig, ModelSource, QueueConfig,
-        SessionConfig,
+        AgentAPI, AgentConfig, FinishReason, GenerationRequest, Message, MessageRole, ModelConfig,
+        ModelSource, QueueConfig, SessionConfig,
     },
+    AgentServer,
 };
-use std::{path::PathBuf, sync::Arc, time::Duration};
-use tracing::{error, info};
+use std::{path::PathBuf, time::Duration};
+use tokio::signal;
+use tracing::{error, info, warn};
+
+const SEPARATOR_WIDTH: usize = 60;
 
 #[derive(Parser)]
 #[command(name = "llama-agent-cli")]
@@ -29,8 +30,8 @@ Examples:
   # Use local model folder
   llama-agent-cli --model ./models/llama2-7b --prompt \"Explain quantum computing\" --limit 200
 
-  # Use local specific file
-  llama-agent-cli --model ./models/llama2-7b --filename llama-2-7b.q4_k_m.gguf --prompt \"Write a haiku\""
+  # Use local specific file with custom settings
+  llama-agent-cli --model ./models/llama2-7b --filename llama-2-7b.q4_k_m.gguf --prompt \"Write a haiku\" --temperature 0.8 --top-p 0.95"
 )]
 struct Args {
     /// Model source: HuggingFace repo name (e.g. 'microsoft/DialoGPT-medium') or local folder path
@@ -49,6 +50,38 @@ struct Args {
     /// Stop generation after this many tokens even without proper stop token
     #[arg(long, default_value = "512")]
     limit: u32,
+
+    /// Model batch size for processing
+    #[arg(long, default_value = "512")]
+    batch_size: u32,
+
+    /// Maximum queue size for pending requests
+    #[arg(long, default_value = "10")]
+    max_queue_size: usize,
+
+    /// Request timeout in seconds
+    #[arg(long, default_value = "120")]
+    request_timeout: u64,
+
+    /// Number of worker threads
+    #[arg(long, default_value = "1")]
+    worker_threads: usize,
+
+    /// Maximum number of concurrent sessions
+    #[arg(long, default_value = "10")]
+    max_sessions: usize,
+
+    /// Session timeout in seconds
+    #[arg(long, default_value = "3600")]
+    session_timeout: u64,
+
+    /// Temperature for text generation (0.0 to 1.0)
+    #[arg(long, default_value = "0.7")]
+    temperature: f32,
+
+    /// Top-p for nucleus sampling (0.0 to 1.0)
+    #[arg(long, default_value = "0.9")]
+    top_p: f32,
 }
 
 #[tokio::main]
@@ -65,8 +98,7 @@ async fn main() -> Result<()> {
 
     // Initialize agent components and process request
     match run_agent(args).await {
-        Ok(response) => {
-            println!("Response: {}", response);
+        Ok(_response) => {
             std::process::exit(0);
         }
         Err(e) => {
@@ -81,7 +113,9 @@ async fn main() -> Result<()> {
                 // Validation error - exit code 2
                 eprintln!("Error: {}", e);
                 std::process::exit(2);
-            } else if error_msg.contains("Failed to load model") {
+            } else if error_msg.contains("Failed to load model")
+                || error_msg.contains("Failed to initialize agent")
+            {
                 // Model loading error - exit code 3
                 eprintln!("Model Error: {}", e);
                 std::process::exit(3);
@@ -151,6 +185,54 @@ fn validate_args(args: &Args) -> Result<()> {
         return Err(anyhow::anyhow!("Prompt cannot be empty"));
     }
 
+    // Validate batch size
+    if args.batch_size == 0 {
+        return Err(anyhow::anyhow!("Batch size must be greater than 0"));
+    }
+    if args.batch_size > 2048 {
+        return Err(anyhow::anyhow!(
+            "Batch size is too large: {}. Maximum recommended is 2048",
+            args.batch_size
+        ));
+    }
+
+    // Validate queue configuration
+    if args.max_queue_size == 0 {
+        return Err(anyhow::anyhow!("Max queue size must be greater than 0"));
+    }
+    if args.request_timeout == 0 {
+        return Err(anyhow::anyhow!(
+            "Request timeout must be greater than 0 seconds"
+        ));
+    }
+    if args.worker_threads == 0 {
+        return Err(anyhow::anyhow!("Worker threads must be greater than 0"));
+    }
+
+    // Validate session configuration
+    if args.max_sessions == 0 {
+        return Err(anyhow::anyhow!("Max sessions must be greater than 0"));
+    }
+    if args.session_timeout == 0 {
+        return Err(anyhow::anyhow!(
+            "Session timeout must be greater than 0 seconds"
+        ));
+    }
+
+    // Validate generation parameters
+    if args.temperature < 0.0 || args.temperature > 2.0 {
+        return Err(anyhow::anyhow!(
+            "Temperature must be between 0.0 and 2.0, got: {}",
+            args.temperature
+        ));
+    }
+    if args.top_p < 0.0 || args.top_p > 1.0 {
+        return Err(anyhow::anyhow!(
+            "Top-p must be between 0.0 and 1.0, got: {}",
+            args.top_p
+        ));
+    }
+
     Ok(())
 }
 
@@ -170,7 +252,7 @@ async fn run_agent(args: Args) -> Result<String> {
                 folder: PathBuf::from(&args.model),
                 filename: args.filename,
             },
-            batch_size: 512, // Default batch size
+            batch_size: args.batch_size,
             use_hf_params: false,
         }
     } else {
@@ -180,40 +262,86 @@ async fn run_agent(args: Args) -> Result<String> {
                 repo: args.model.clone(),
                 filename: args.filename,
             },
-            batch_size: 512, // Default batch size
+            batch_size: args.batch_size,
             use_hf_params: true,
         }
     };
 
-    // Create configurations
-    let queue_config = QueueConfig {
-        max_queue_size: 10,
-        request_timeout: Duration::from_secs(30),
-        worker_threads: 2, // Default worker threads
+    // Create agent configuration
+    let agent_config = AgentConfig {
+        model: model_config,
+        queue_config: QueueConfig {
+            max_queue_size: args.max_queue_size,
+            request_timeout: Duration::from_secs(args.request_timeout),
+            worker_threads: args.worker_threads,
+        },
+        session_config: SessionConfig {
+            max_sessions: args.max_sessions,
+            session_timeout: Duration::from_secs(args.session_timeout),
+        },
+        mcp_servers: vec![], // No MCP servers for basic CLI
     };
 
-    let session_config = SessionConfig {
-        max_sessions: 100,
-        session_timeout: Duration::from_secs(3600),
+    info!("Initializing AgentServer (this may take a while for model loading)...");
+    println!("Loading model from {}...", args.model);
+
+    // Initialize agent server with progress indication
+    let agent = match AgentServer::initialize(agent_config).await {
+        Ok(agent) => {
+            println!("✓ Model loaded successfully!");
+            agent
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Failed to initialize agent: {}", e));
+        }
     };
 
-    info!("Initializing model manager...");
-    let model_manager = Arc::new(ModelManager::new(model_config)?);
+    // Set up graceful shutdown handler using channels
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
 
-    // Load the model
-    if let Err(e) = model_manager.load_model().await {
-        return Err(anyhow::anyhow!("Failed to load model: {}", e));
+    // Spawn shutdown signal handler
+    tokio::spawn(async move {
+        match signal::ctrl_c().await {
+            Ok(()) => {
+                warn!("Interrupt signal received, shutting down gracefully...");
+                println!("\n\nShutting down gracefully...");
+                let _ = shutdown_tx.send(()).await;
+            }
+            Err(err) => {
+                error!("Failed to listen for shutdown signal: {}", err);
+            }
+        }
+    });
+
+    // Store agent in an option so we can take ownership when needed
+    let mut agent_option = Some(agent);
+
+    // Check for shutdown signal before proceeding
+    if shutdown_rx.try_recv().is_ok() {
+        if let Some(agent) = agent_option.take() {
+            info!("Performing graceful shutdown...");
+            if let Err(e) = agent.shutdown().await {
+                error!("Error during shutdown: {}", e);
+            }
+        }
+        std::process::exit(0);
     }
 
-    info!("Initializing request queue...");
-    let queue = Arc::new(RequestQueue::new(model_manager.clone(), queue_config));
+    let agent = agent_option.take().unwrap();
 
-    info!("Initializing session manager...");
-    let session_manager = Arc::new(SessionManager::new(session_config));
+    // Create a session
+    let mut session = agent.create_session().await?;
+    info!("Created session: {}", session.id);
 
-    // Create a new session
-    let session = session_manager.create_session().await?;
-    let session_id = session.id;
+    // Discover available tools (even though we have none configured)
+    agent.discover_tools(&mut session).await?;
+
+    if !session.available_tools.is_empty() {
+        info!("Discovered {} tools", session.available_tools.len());
+        for tool in &session.available_tools {
+            println!("  - {}: {}", tool.name, tool.description);
+        }
+    }
 
     // Add the user message
     let message = Message {
@@ -223,28 +351,76 @@ async fn run_agent(args: Args) -> Result<String> {
         tool_name: None,
         timestamp: std::time::SystemTime::now(),
     };
+    session.messages.push(message);
+    session.updated_at = std::time::SystemTime::now();
 
-    session_manager.add_message(&session_id, message).await?;
-
-    // Get the updated session for generation
-    let updated_session = session_manager
-        .get_session(&session_id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("Session not found after adding message"))?;
+    // Update session
+    agent.update_session(session.clone()).await?;
 
     // Create generation request
     let request = GenerationRequest {
-        session: updated_session,
+        session: session.clone(),
         max_tokens: Some(args.limit),
-        temperature: Some(0.7),
-        top_p: Some(0.9),
+        temperature: Some(args.temperature),
+        top_p: Some(args.top_p),
         stop_tokens: vec![],
     };
 
-    info!("Processing generation request...");
-    match queue.submit_request(request).await {
+    println!("\nGenerating response...");
+    let start_time = std::time::Instant::now();
+
+    match agent.generate(request).await {
         Ok(response) => {
-            info!("Generation completed successfully");
+            let generation_time = start_time.elapsed();
+
+            // Display generation statistics
+            println!("\n{}", "=".repeat(SEPARATOR_WIDTH));
+            println!(
+                "Response ({} tokens, {:.2}s):",
+                response.tokens_generated,
+                generation_time.as_secs_f32()
+            );
+            println!("{}", "=".repeat(SEPARATOR_WIDTH));
+
+            // Handle different finish reasons
+            match response.finish_reason {
+                FinishReason::ToolCall => {
+                    println!("\n⚠️  Model wants to call tools, but basic CLI doesn't support tool execution yet.");
+                    println!("Generated text with tool calls:");
+                    println!("{}", response.generated_text);
+                }
+                FinishReason::MaxTokens => {
+                    println!("{}", response.generated_text);
+                    println!(
+                        "\n⚠️  Response truncated due to token limit ({})",
+                        args.limit
+                    );
+                }
+                FinishReason::StopToken => {
+                    println!("{}", response.generated_text);
+                }
+                FinishReason::EndOfSequence => {
+                    println!("{}", response.generated_text);
+                }
+                FinishReason::Error(ref err) => {
+                    println!("{}", response.generated_text);
+                    println!("\n❌ Generation completed with error: {}", err);
+                }
+            }
+
+            println!("{}", "=".repeat(SEPARATOR_WIDTH));
+            println!("Generation Statistics:");
+            println!("  Tokens generated: {}", response.tokens_generated);
+            println!("  Time taken: {:.2}s", generation_time.as_secs_f32());
+            if response.tokens_generated > 0 {
+                println!(
+                    "  Tokens per second: {:.1}",
+                    response.tokens_generated as f32 / generation_time.as_secs_f32()
+                );
+            }
+            println!("  Finish reason: {:?}", response.finish_reason);
+            println!("{}", "=".repeat(SEPARATOR_WIDTH));
+
             Ok(response.generated_text)
         }
         Err(e) => {
