@@ -36,6 +36,9 @@ async-trait = { workspace = true }
 # Futures
 futures = { workspace = true }
 
+# HuggingFace integration  
+hf-hub = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 proptest = { workspace = true }
