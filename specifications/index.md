@@ -574,7 +574,7 @@ Required Cargo.toml dependencies:
 ```toml
 [dependencies]
 # Core inference
-llama-cpp-2 = "0.1.109"
+llama-cpp-2 = "0.1.114"
 
 # MCP integration
 rmcp = "0.4.0"
