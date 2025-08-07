@@ -479,19 +479,21 @@ pub struct HealthStatus {
 // Error types
 #[derive(Debug, Error)]
 pub enum AgentError {
-    #[error("Model error: {0}")]
+    #[error("Model error: {0}\n💡 Check model file exists, is valid GGUF format, and sufficient memory is available")]
     Model(#[from] ModelError),
 
-    #[error("Queue error: {0}")]
+    #[error("Request processing error: {0}\n💡 Try reducing concurrent requests, increasing queue size, or adding more system resources")]
     Queue(#[from] QueueError),
 
-    #[error("Session error: {0}")]
+    #[error(
+        "Session error: {0}\n💡 Verify session ID is valid and session limits are not exceeded"
+    )]
     Session(#[from] SessionError),
 
-    #[error("MCP error: {0}")]
+    #[error("MCP server error: {0}\n💡 Ensure MCP server is running, accessible, and check network connectivity")]
     MCP(#[from] MCPError),
 
-    #[error("Template error: {0}")]
+    #[error("Template processing error: {0}\n💡 Check message format and tool definitions are properly structured")]
     Template(#[from] TemplateError),
 
     #[error("Request timeout: Operation took longer than {timeout:?}. Try reducing the request complexity or increasing the timeout value.")]

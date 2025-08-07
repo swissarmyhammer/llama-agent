@@ -6,6 +6,7 @@ use llama_cpp_2::{
 };
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
@@ -15,6 +16,8 @@ pub struct ModelManager {
     model: Arc<RwLock<Option<LlamaModel>>>,
     backend: Arc<LlamaBackend>,
     config: ModelConfig,
+    load_start_time: Option<Instant>,
+    memory_usage_bytes: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl ModelManager {
@@ -51,14 +54,18 @@ impl ModelManager {
             }
         };
 
-        Ok(Self {
+        let manager = Self {
             model: Arc::new(RwLock::new(None)),
             backend,
             config,
-        })
+            load_start_time: None,
+            memory_usage_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        };
+        Ok(manager)
     }
 
     pub async fn load_model(&self) -> Result<(), ModelError> {
+        let start_time = Instant::now();
         info!("🚀 Starting model loading process...");
         info!("Model configuration: {:?}", self.config);
 
@@ -70,18 +77,38 @@ impl ModelManager {
         self.config.validate()?;
         info!("✅ Configuration validation completed");
 
-        // Load model based on source type
+        // Log memory usage before loading
+        let memory_before = Self::get_process_memory_mb().unwrap_or(0);
+        debug!("Memory usage before model loading: {} MB", memory_before);
+
+        // Load model based on source type with progress indication
         let model = match &self.config.source {
             ModelSource::HuggingFace { repo, filename } => {
+                info!("Starting HuggingFace model download/loading for: {}", repo);
                 self.load_huggingface_model(repo, filename.as_deref())
                     .await?
             }
             ModelSource::Local { folder, filename } => {
+                info!("Loading local model from: {}", folder.display());
                 self.load_local_model(folder, filename.as_deref()).await?
             }
         };
 
+        let load_time = start_time.elapsed();
+        let memory_after = Self::get_process_memory_mb().unwrap_or(0);
+        let memory_used = memory_after.saturating_sub(memory_before);
+
+        // Store memory usage estimate (atomic operation safe in Arc)
+        self.memory_usage_bytes.store(
+            memory_used * 1024 * 1024,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+
         info!("💾 Storing model in memory...");
+        info!(
+            "Model loaded successfully in {:?} (Memory: +{} MB, Total: {} MB)",
+            load_time, memory_used, memory_after
+        );
 
         // Store model
         {
@@ -170,6 +197,11 @@ impl ModelManager {
             .with_n_threads_batch(num_cpus::get().min(4) as i32) // Optimize batch threads
             .with_embeddings(false) // Disable embeddings for inference-only mode
             .with_offload_kqv(true); // Enable KQV offloading for memory optimization
+
+        debug!(
+            "Creating context with optimized parameters for batch_size={}",
+            self.config.batch_size
+        );
 
         model
             .new_context(&self.backend, context_params)
@@ -334,6 +366,73 @@ impl ModelManager {
             );
         }
     }
+
+    /// Get current process memory usage in MB
+    fn get_process_memory_mb() -> Result<u64, std::io::Error> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::fs;
+            let status = fs::read_to_string("/proc/self/status")?;
+            for line in status.lines() {
+                if line.starts_with("VmRSS:") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        if let Ok(kb) = parts[1].parse::<u64>() {
+                            return Ok(kb / 1024); // Convert KB to MB
+                        }
+                    }
+                }
+            }
+            Ok(0)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // Use mach API on macOS for memory info
+            // For simplicity, return 0 - could be implemented with mach sys calls
+            Ok(0)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            // Use Windows API for memory info
+            // For simplicity, return 0 - could be implemented with winapi
+            Ok(0)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        {
+            Ok(0)
+        }
+    }
+
+    /// Get optimal thread count for inference
+    #[allow(dead_code)]
+    fn get_optimal_thread_count() -> u32 {
+        let logical_cores = std::thread::available_parallelism()
+            .map(|p| p.get() as u32)
+            .unwrap_or(4);
+
+        // Use 75% of available cores, minimum 1, maximum 16
+        let optimal = ((logical_cores * 3) / 4).clamp(1, 16);
+        debug!(
+            "Detected {} logical cores, using {} threads for inference",
+            logical_cores, optimal
+        );
+        optimal
+    }
+
+    /// Get estimated memory usage of the loaded model in bytes
+    pub fn get_memory_usage_bytes(&self) -> u64 {
+        self.memory_usage_bytes
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Get model loading statistics
+    pub fn get_load_stats(&self) -> Option<(std::time::Duration, u64)> {
+        self.load_start_time.map(|start| {
+            let duration = start.elapsed();
+            let memory_bytes = self.get_memory_usage_bytes();
+            (duration, memory_bytes)
+        })
+    }
 }
 
 /// Memory usage information
@@ -345,23 +444,10 @@ pub struct MemoryUsageInfo {
 
 /// Get current process memory usage in MB
 fn get_process_memory_usage() -> f64 {
-    #[cfg(target_os = "linux")]
-    {
-        use std::fs;
-        if let Ok(status) = fs::read_to_string("/proc/self/status") {
-            for line in status.lines() {
-                if line.starts_with("VmRSS:") {
-                    if let Ok(kb) = line.split_whitespace().nth(1).unwrap_or("0").parse::<f64>() {
-                        return kb / 1024.0; // Convert KB to MB
-                    }
-                }
-            }
-        }
+    match ModelManager::get_process_memory_mb() {
+        Ok(mb) => mb as f64,
+        Err(_) => 0.0,
     }
-
-    // Fallback for non-Linux systems or if reading fails
-    // Return a placeholder value to prevent errors in cross-platform development
-    0.0
 }
 
 #[cfg(test)]
@@ -428,7 +514,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             Some("test-model.gguf".to_string()),
         );
-        let manager = ModelManager::new(config).expect("Failed to create ModelManager");
+        let manager = Arc::new(ModelManager::new(config).expect("Failed to create ModelManager"));
 
         // This should fail because dummy content is not a valid GGUF model
         let result = manager.load_model().await;
@@ -443,7 +529,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             Some("nonexistent.gguf".to_string()),
         );
-        let manager = ModelManager::new(config).expect("Failed to create ModelManager");
+        let manager = Arc::new(ModelManager::new(config).expect("Failed to create ModelManager"));
 
         let result = manager.load_model().await;
         assert!(result.is_err());
@@ -463,6 +549,7 @@ mod tests {
         // When running tests in parallel, the backend might already be initialized by another test
         match ModelManager::new(config) {
             Ok(manager) => {
+                let manager = Arc::new(manager);
                 let result = manager.load_model().await;
                 assert!(result.is_err());
                 match result.unwrap_err() {
@@ -497,7 +584,7 @@ mod tests {
         fs::write(&another_model, b"another model").await.unwrap();
 
         let config = create_test_config_local(temp_dir.path().to_path_buf(), None);
-        let manager = ModelManager::new(config).expect("Failed to create ModelManager");
+        let manager = Arc::new(ModelManager::new(config).expect("Failed to create ModelManager"));
 
         // This should try to load the BF16 file first (though it will fail with invalid content)
         let result = manager.load_model().await;
@@ -517,6 +604,7 @@ mod tests {
         // When running tests in parallel, the backend might already be initialized by another test
         match ModelManager::new(config) {
             Ok(manager) => {
+                let manager = Arc::new(manager);
                 let result = manager.load_model().await;
                 assert!(result.is_err());
                 match result.unwrap_err() {
@@ -548,6 +636,7 @@ mod tests {
                 // Test that we can create the manager (HF loading will treat repo as local path and fail)
                 assert!(!manager.is_loaded().await);
 
+                let manager = Arc::new(manager);
                 let result = manager.load_model().await;
                 assert!(result.is_err()); // Will fail since "microsoft/DialoGPT-medium" is not a local path
             }

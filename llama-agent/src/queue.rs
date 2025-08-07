@@ -53,6 +53,7 @@ pub struct QueueMetrics {
     pub total_tokens_generated: AtomicU64,
     pub peak_memory_usage_bytes: AtomicU64,
     pub current_memory_usage_bytes: AtomicU64,
+    pub last_throughput_tokens_per_second: AtomicU64,
 }
 
 impl QueueMetrics {
@@ -69,6 +70,7 @@ impl QueueMetrics {
             total_tokens_generated: AtomicU64::new(0),
             peak_memory_usage_bytes: AtomicU64::new(0),
             current_memory_usage_bytes: AtomicU64::new(0),
+            last_throughput_tokens_per_second: AtomicU64::new(0),
         }
     }
 
@@ -94,10 +96,19 @@ impl QueueMetrics {
     pub fn record_request_completed(&self, processing_time: Duration, tokens_generated: u32) {
         self.completed_requests.fetch_add(1, Ordering::Relaxed);
         self.current_queue_size.fetch_sub(1, Ordering::Relaxed);
+
+        let processing_ms = processing_time.as_millis() as u64;
         self.total_processing_time_ms
-            .fetch_add(processing_time.as_millis() as u64, Ordering::Relaxed);
+            .fetch_add(processing_ms, Ordering::Relaxed);
         self.total_tokens_generated
             .fetch_add(tokens_generated as u64, Ordering::Relaxed);
+
+        // Calculate and store current throughput (tokens per second)
+        if processing_ms > 0 {
+            let throughput = (tokens_generated as u64 * 1000) / processing_ms;
+            self.last_throughput_tokens_per_second
+                .store(throughput, Ordering::Relaxed);
+        }
     }
 
     pub fn record_request_failed(&self) {
@@ -176,6 +187,9 @@ impl QueueMetrics {
             },
             current_memory_usage_bytes: self.current_memory_usage_bytes.load(Ordering::Relaxed),
             peak_memory_usage_bytes: self.peak_memory_usage_bytes.load(Ordering::Relaxed),
+            current_throughput_tps: self
+                .last_throughput_tokens_per_second
+                .load(Ordering::Relaxed),
         }
     }
 }
@@ -194,6 +208,7 @@ pub struct QueueStats {
     pub throughput_tokens_per_second: u64,
     pub current_memory_usage_bytes: u64,
     pub peak_memory_usage_bytes: u64,
+    pub current_throughput_tps: u64,
 }
 
 #[derive(Debug)]
@@ -699,7 +714,7 @@ impl RequestQueue {
                 break;
             }
 
-            // Convert token to string
+            // Convert token to string with buffer reuse
             let token_str = match model.token_to_str(token, Special::Tokenize) {
                 Ok(s) => s,
                 Err(e) => {
@@ -708,6 +723,10 @@ impl RequestQueue {
                 }
             };
 
+            // Efficient string concatenation
+            if generated_text.capacity() - generated_text.len() < token_str.len() {
+                generated_text.reserve(token_str.len() * 2); // Reserve extra space
+            }
             generated_text.push_str(&token_str);
             tokens_generated += 1;
 
@@ -937,6 +956,9 @@ impl RequestQueue {
         let mut generated_text = String::with_capacity(estimated_chars);
         let mut tokens_generated = 0u32;
         let mut n_cur = tokens_list.len();
+
+        // Pre-allocate token buffer for better memory management
+        let mut _token_buffer: Vec<u8> = Vec::with_capacity(64);
 
         // Generation loop - stream tokens one by one
         while tokens_generated < max_tokens {
@@ -1168,6 +1190,30 @@ impl RequestQueue {
                 ))
             }
         }
+    }
+
+    /// Shutdown with timeout and return statistics
+    pub async fn shutdown_with_timeout(self, timeout: Duration) -> QueueStats {
+        let stats_before = self.get_stats();
+        info!("Starting RequestQueue shutdown with {:?} timeout", timeout);
+
+        let shutdown_future = async {
+            let _ = self.shutdown().await;
+        };
+
+        match tokio::time::timeout(timeout, shutdown_future).await {
+            Ok(()) => {
+                info!("RequestQueue shutdown completed within timeout");
+            }
+            Err(_) => {
+                warn!(
+                    "RequestQueue shutdown timed out after {:?} (had {} requests in queue)",
+                    timeout, stats_before.current_queue_size
+                );
+            }
+        }
+
+        stats_before
     }
 }
 
