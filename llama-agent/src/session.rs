@@ -1,4 +1,4 @@
-use crate::types::{Session, SessionConfig, SessionError, Message, SessionId};
+use crate::types::{Message, Session, SessionConfig, SessionError, SessionId};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -20,7 +20,7 @@ impl SessionManager {
 
     pub async fn create_session(&self) -> Result<Session, SessionError> {
         let mut sessions = self.sessions.write().await;
-        
+
         // Check if we've reached the session limit
         if sessions.len() >= self.config.max_sessions {
             warn!("Session limit reached: {}", self.config.max_sessions);
@@ -43,9 +43,12 @@ impl SessionManager {
         Ok(session)
     }
 
-    pub async fn get_session(&self, session_id: &SessionId) -> Result<Option<Session>, SessionError> {
+    pub async fn get_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Session>, SessionError> {
         let sessions = self.sessions.read().await;
-        
+
         match sessions.get(session_id) {
             Some(session) => {
                 // Check if session has expired
@@ -57,13 +60,13 @@ impl SessionManager {
                 }
                 Ok(Some(session.clone()))
             }
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 
     pub async fn update_session(&self, session: Session) -> Result<(), SessionError> {
         let mut sessions = self.sessions.write().await;
-        
+
         // Check if session exists
         if !sessions.contains_key(&session.id) {
             return Err(SessionError::NotFound(session.id.to_string()));
@@ -79,29 +82,37 @@ impl SessionManager {
         Ok(())
     }
 
-    pub async fn add_message(&self, session_id: &SessionId, message: Message) -> Result<(), SessionError> {
+    pub async fn add_message(
+        &self,
+        session_id: &SessionId,
+        message: Message,
+    ) -> Result<(), SessionError> {
         let mut sessions = self.sessions.write().await;
-        
+
         match sessions.get_mut(session_id) {
             Some(session) => {
                 session.messages.push(message);
                 session.updated_at = SystemTime::now();
-                debug!("Added message to session {}, total messages: {}", session_id, session.messages.len());
+                debug!(
+                    "Added message to session {}, total messages: {}",
+                    session_id,
+                    session.messages.len()
+                );
                 Ok(())
             }
-            None => Err(SessionError::NotFound(session_id.to_string()))
+            None => Err(SessionError::NotFound(session_id.to_string())),
         }
     }
 
     pub async fn delete_session(&self, session_id: &SessionId) -> Result<bool, SessionError> {
         let mut sessions = self.sessions.write().await;
-        
+
         match sessions.remove(session_id) {
             Some(_) => {
                 info!("Deleted session: {}", session_id);
                 Ok(true)
             }
-            None => Ok(false)
+            None => Ok(false),
         }
     }
 
@@ -145,14 +156,14 @@ impl SessionManager {
 
     pub async fn get_session_stats(&self) -> SessionStats {
         let sessions = self.sessions.read().await;
-        
+
         let mut total_messages = 0;
         let mut active_sessions = 0;
         let mut expired_sessions = 0;
 
         for session in sessions.values() {
             total_messages += session.messages.len();
-            
+
             if let Ok(age) = session.updated_at.elapsed() {
                 if age <= self.config.session_timeout {
                     active_sessions += 1;
@@ -210,9 +221,9 @@ mod tests {
     async fn test_session_manager_creation() {
         let config = create_test_config();
         let manager = SessionManager::new(config);
-        
+
         assert_eq!(manager.get_session_count().await, 0);
-        
+
         let sessions = manager.list_sessions().await.unwrap();
         assert!(sessions.is_empty());
     }
@@ -223,9 +234,9 @@ mod tests {
         let manager = SessionManager::new(config);
 
         let session = manager.create_session().await.unwrap();
-        
+
         // Session ID is a ULID and should be valid
-        assert!(session.id.to_string().len() > 0);
+        assert!(!session.id.to_string().is_empty());
         assert!(session.messages.is_empty());
         assert!(session.mcp_servers.is_empty());
         assert!(session.available_tools.is_empty());
@@ -259,12 +270,12 @@ mod tests {
         let mut session = manager.create_session().await.unwrap();
         let session_id = session.id;
         let original_updated_at = session.updated_at;
-        
+
         // Wait a bit to ensure timestamp difference
         tokio::time::sleep(Duration::from_millis(10)).await;
-        
+
         session.messages.push(create_test_message());
-        
+
         let result = manager.update_session(session).await;
         assert!(result.is_ok());
 
@@ -350,7 +361,7 @@ mod tests {
         // Create sessions up to the limit
         let _session1 = manager.create_session().await.unwrap();
         let _session2 = manager.create_session().await.unwrap();
-        
+
         // Try to create one more session - should fail
         let result = manager.create_session().await;
         assert!(matches!(result, Err(SessionError::LimitExceeded)));
@@ -424,10 +435,19 @@ mod tests {
         // Create some sessions with messages
         let session1 = manager.create_session().await.unwrap();
         let session2 = manager.create_session().await.unwrap();
-        
-        manager.add_message(&session1.id, create_test_message()).await.unwrap();
-        manager.add_message(&session2.id, create_test_message()).await.unwrap();
-        manager.add_message(&session2.id, create_test_message()).await.unwrap();
+
+        manager
+            .add_message(&session1.id, create_test_message())
+            .await
+            .unwrap();
+        manager
+            .add_message(&session2.id, create_test_message())
+            .await
+            .unwrap();
+        manager
+            .add_message(&session2.id, create_test_message())
+            .await
+            .unwrap();
 
         let stats = manager.get_session_stats().await;
         assert_eq!(stats.total_sessions, 2);
