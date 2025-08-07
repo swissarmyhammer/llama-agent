@@ -1,16 +1,15 @@
 use anyhow::Result;
 use clap::Parser;
 use llama_agent::{
-    model::ModelManager,
-    queue::RequestQueue,
-    session::SessionManager,
     types::{
-        GenerationRequest, Message, MessageRole, ModelConfig, ModelSource, QueueConfig,
-        SessionConfig,
+        AgentAPI, AgentConfig, FinishReason, GenerationRequest, Message, MessageRole, ModelConfig,
+        ModelSource, QueueConfig, SessionConfig,
     },
+    AgentServer,
 };
-use std::{path::PathBuf, sync::Arc, time::Duration};
-use tracing::{error, info};
+use std::{path::PathBuf, time::Duration};
+use tokio::signal;
+use tracing::{error, info, warn};
 
 #[derive(Parser)]
 #[command(name = "llama-agent-cli")]
@@ -65,8 +64,7 @@ async fn main() -> Result<()> {
 
     // Initialize agent components and process request
     match run_agent(args).await {
-        Ok(response) => {
-            println!("Response: {}", response);
+        Ok(_response) => {
             std::process::exit(0);
         }
         Err(e) => {
@@ -81,7 +79,9 @@ async fn main() -> Result<()> {
                 // Validation error - exit code 2
                 eprintln!("Error: {}", e);
                 std::process::exit(2);
-            } else if error_msg.contains("Failed to load model") {
+            } else if error_msg.contains("Failed to load model")
+                || error_msg.contains("Failed to initialize agent")
+            {
                 // Model loading error - exit code 3
                 eprintln!("Model Error: {}", e);
                 std::process::exit(3);
@@ -170,7 +170,7 @@ async fn run_agent(args: Args) -> Result<String> {
                 folder: PathBuf::from(&args.model),
                 filename: args.filename,
             },
-            batch_size: 512, // Default batch size
+            batch_size: 512,
             use_hf_params: false,
         }
     } else {
@@ -180,40 +180,73 @@ async fn run_agent(args: Args) -> Result<String> {
                 repo: args.model.clone(),
                 filename: args.filename,
             },
-            batch_size: 512, // Default batch size
+            batch_size: 512,
             use_hf_params: true,
         }
     };
 
-    // Create configurations
-    let queue_config = QueueConfig {
-        max_queue_size: 10,
-        request_timeout: Duration::from_secs(30),
-        worker_threads: 2, // Default worker threads
+    // Create agent configuration
+    let agent_config = AgentConfig {
+        model: model_config,
+        queue_config: QueueConfig {
+            max_queue_size: 10,
+            request_timeout: Duration::from_secs(120), // Longer timeout for model loading
+            worker_threads: 1,                         // Single worker thread for simplicity
+        },
+        session_config: SessionConfig {
+            max_sessions: 10, // Lower limit for CLI
+            session_timeout: Duration::from_secs(3600),
+        },
+        mcp_servers: vec![], // No MCP servers for basic CLI
     };
 
-    let session_config = SessionConfig {
-        max_sessions: 100,
-        session_timeout: Duration::from_secs(3600),
+    info!("Initializing AgentServer (this may take a while for model loading)...");
+    println!("Loading model from {}...", args.model);
+
+    // Initialize agent server with progress indication
+    let agent = match AgentServer::initialize(agent_config).await {
+        Ok(agent) => {
+            println!("✓ Model loaded successfully!");
+            agent
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Failed to initialize agent: {}", e));
+        }
     };
 
-    info!("Initializing model manager...");
-    let model_manager = Arc::new(ModelManager::new(model_config)?);
+    // Set up graceful shutdown handler
+    let agent_for_shutdown = std::sync::Arc::new(agent);
+    let _agent_clone = agent_for_shutdown.clone();
 
-    // Load the model
-    if let Err(e) = model_manager.load_model().await {
-        return Err(anyhow::anyhow!("Failed to load model: {}", e));
+    // Spawn shutdown handler
+    tokio::spawn(async move {
+        match signal::ctrl_c().await {
+            Ok(()) => {
+                warn!("Interrupt signal received, shutting down gracefully...");
+                println!("\n\nShutting down gracefully...");
+                // Note: We can't call shutdown here because we'd need to move the agent
+                // For now, just let the process exit naturally
+                std::process::exit(0);
+            }
+            Err(err) => {
+                error!("Failed to listen for shutdown signal: {}", err);
+            }
+        }
+    });
+
+    // Create a session
+    let mut session = agent_for_shutdown.create_session().await?;
+    info!("Created session: {}", session.id);
+
+    // Discover available tools (even though we have none configured)
+    agent_for_shutdown.discover_tools(&mut session).await?;
+
+    if !session.available_tools.is_empty() {
+        info!("Discovered {} tools", session.available_tools.len());
+        for tool in &session.available_tools {
+            println!("  - {}: {}", tool.name, tool.description);
+        }
     }
-
-    info!("Initializing request queue...");
-    let queue = Arc::new(RequestQueue::new(model_manager.clone(), queue_config));
-
-    info!("Initializing session manager...");
-    let session_manager = Arc::new(SessionManager::new(session_config));
-
-    // Create a new session
-    let session = session_manager.create_session().await?;
-    let session_id = session.id;
 
     // Add the user message
     let message = Message {
@@ -223,28 +256,76 @@ async fn run_agent(args: Args) -> Result<String> {
         tool_name: None,
         timestamp: std::time::SystemTime::now(),
     };
+    session.messages.push(message);
+    session.updated_at = std::time::SystemTime::now();
 
-    session_manager.add_message(&session_id, message).await?;
-
-    // Get the updated session for generation
-    let updated_session = session_manager
-        .get_session(&session_id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("Session not found after adding message"))?;
+    // Update session
+    agent_for_shutdown.update_session(session.clone()).await?;
 
     // Create generation request
     let request = GenerationRequest {
-        session: updated_session,
+        session: session.clone(),
         max_tokens: Some(args.limit),
         temperature: Some(0.7),
         top_p: Some(0.9),
         stop_tokens: vec![],
     };
 
-    info!("Processing generation request...");
-    match queue.submit_request(request).await {
+    println!("\nGenerating response...");
+    let start_time = std::time::Instant::now();
+
+    match agent_for_shutdown.generate(request).await {
         Ok(response) => {
-            info!("Generation completed successfully");
+            let generation_time = start_time.elapsed();
+
+            // Display generation statistics
+            println!("\n{}", "=".repeat(60));
+            println!(
+                "Response ({} tokens, {:.2}s):",
+                response.tokens_generated,
+                generation_time.as_secs_f32()
+            );
+            println!("{}", "=".repeat(60));
+
+            // Handle different finish reasons
+            match response.finish_reason {
+                FinishReason::ToolCall => {
+                    println!("\n⚠️  Model wants to call tools, but basic CLI doesn't support tool execution yet.");
+                    println!("Generated text with tool calls:");
+                    println!("{}", response.generated_text);
+                }
+                FinishReason::MaxTokens => {
+                    println!("{}", response.generated_text);
+                    println!(
+                        "\n⚠️  Response truncated due to token limit ({})",
+                        args.limit
+                    );
+                }
+                FinishReason::StopToken => {
+                    println!("{}", response.generated_text);
+                }
+                FinishReason::EndOfSequence => {
+                    println!("{}", response.generated_text);
+                }
+                FinishReason::Error(ref err) => {
+                    println!("{}", response.generated_text);
+                    println!("\n❌ Generation completed with error: {}", err);
+                }
+            }
+
+            println!("{}", "=".repeat(60));
+            println!("Generation Statistics:");
+            println!("  Tokens generated: {}", response.tokens_generated);
+            println!("  Time taken: {:.2}s", generation_time.as_secs_f32());
+            if response.tokens_generated > 0 {
+                println!(
+                    "  Tokens per second: {:.1}",
+                    response.tokens_generated as f32 / generation_time.as_secs_f32()
+                );
+            }
+            println!("  Finish reason: {:?}", response.finish_reason);
+            println!("{}", "=".repeat(60));
+
             Ok(response.generated_text)
         }
         Err(e) => {
