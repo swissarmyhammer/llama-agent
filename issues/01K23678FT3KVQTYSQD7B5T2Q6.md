@@ -31,3 +31,19 @@ llama_model_loader: - kv  20:                         tokenizer.ggml.pre str    
 
 
 All this should only show up with a --debug switch that powers a debug option boolean on the session.
+
+## Proposed Solution
+
+After analyzing the codebase, the verbose llama_cpp logging is coming from the `llama_cpp_2` library when loading models. The solution involves:
+
+1. **Add `--debug` flag to CLI arguments** - This will be a boolean flag that defaults to false
+2. **Configure logging levels based on debug flag** - Replace the simple `tracing_subscriber::fmt::init()` with conditional logging setup
+3. **Set log level filtering** - When debug is false, set log level to WARN or ERROR to suppress the verbose INFO/DEBUG messages from llama_cpp
+4. **When debug is true** - Show all logging including the verbose model loading information
+
+Implementation steps:
+1. Add `debug: bool` field to the Args struct with default false
+2. Replace `tracing_subscriber::fmt::init()` with conditional setup using `tracing_subscriber::fmt().with_max_level()` 
+3. Use `tracing::Level::WARN` by default, `tracing::Level::DEBUG` when --debug is provided
+
+This approach will suppress the verbose llama_cpp model loading output by default while still allowing users to see it when needed for debugging.

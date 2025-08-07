@@ -980,7 +980,9 @@ impl AgentAPI for AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig};
+    use crate::types::{
+        ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
+    };
 
     fn create_test_config() -> AgentConfig {
         use tempfile::TempDir;
