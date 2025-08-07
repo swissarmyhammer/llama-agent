@@ -195,49 +195,65 @@ impl RequestQueue {
         // Process request with model access - use a closure to work within model lifetime
         if let Some(stream_sender) = queued_request.stream_sender {
             // Handle streaming request
-            let result = model_manager.with_model(|model| {
-                let context_result = model_manager.create_context(model);
-                match context_result {
-                    Ok(_context) => {
-                        // For streaming, we need to handle async differently due to lifetime issues
-                        // For now, return an error indicating this needs further implementation
-                        Err::<(), QueueError>(QueueError::WorkerError("Streaming with real models not yet implemented".to_string()))
+            let result = model_manager
+                .with_model(|model| {
+                    let context_result = model_manager.create_context(model);
+                    match context_result {
+                        Ok(_context) => {
+                            // For streaming, we need to handle async differently due to lifetime issues
+                            // For now, return an error indicating this needs further implementation
+                            Err::<(), QueueError>(QueueError::WorkerError(
+                                "Streaming with real models not yet implemented".to_string(),
+                            ))
+                        }
+                        Err(e) => Err(QueueError::WorkerError(format!(
+                            "Failed to create context: {}",
+                            e
+                        ))),
                     }
-                    Err(e) => Err(QueueError::WorkerError(format!("Failed to create context: {}", e))),
-                }
-            }).await;
+                })
+                .await;
 
             match result {
                 Ok(_) => {
                     // This won't be reached due to the error above, but structure is ready
                 }
                 Err(model_error) => {
-                    let queue_error = QueueError::WorkerError(format!("Model error: {}", model_error));
+                    let queue_error =
+                        QueueError::WorkerError(format!("Model error: {}", model_error));
                     let _ = stream_sender.send(Err(queue_error)).await;
                 }
             }
         } else {
             // Handle batch request
-            let result = model_manager.with_model(|model| {
-                let context_result = model_manager.create_context(model);
-                match context_result {
-                    Ok(context) => {
-                        // Process the request synchronously within the model lifetime
-                        Self::process_batch_request_sync(
-                            worker_id,
-                            request_id.clone(),
-                            &queued_request.request,
-                            model,
-                            &context,
-                        )
+            let result = model_manager
+                .with_model(|model| {
+                    let context_result = model_manager.create_context(model);
+                    match context_result {
+                        Ok(context) => {
+                            // Process the request synchronously within the model lifetime
+                            Self::process_batch_request_sync(
+                                worker_id,
+                                request_id.clone(),
+                                &queued_request.request,
+                                model,
+                                &context,
+                            )
+                        }
+                        Err(e) => Err(QueueError::WorkerError(format!(
+                            "Failed to create context: {}",
+                            e
+                        ))),
                     }
-                    Err(e) => Err(QueueError::WorkerError(format!("Failed to create context: {}", e))),
-                }
-            }).await;
+                })
+                .await;
 
             let final_result = match result {
                 Ok(response) => response,
-                Err(model_error) => Err(QueueError::WorkerError(format!("Model error: {}", model_error))),
+                Err(model_error) => Err(QueueError::WorkerError(format!(
+                    "Model error: {}",
+                    model_error
+                ))),
             };
             let _ = queued_request.response_sender.send(final_result);
         }
@@ -279,44 +295,6 @@ impl RequestQueue {
         })
     }
 
-    async fn process_streaming_request(
-        _worker_id: usize,
-        request_id: String,
-        request: GenerationRequest,
-        _model: LlamaModel,
-        _context: LlamaContext<'_>,
-        stream_sender: mpsc::Sender<Result<StreamChunk, QueueError>>,
-    ) {
-        let session_id_str = request.session.id.to_string();
-        let words = [
-            "Mock",
-            "streaming",
-            "response",
-            "for",
-            "session",
-            &session_id_str,
-        ];
-
-        for (i, word) in words.iter().enumerate() {
-            let chunk = StreamChunk {
-                text: if i == 0 {
-                    word.to_string()
-                } else {
-                    format!(" {}", word)
-                },
-                is_complete: i == words.len() - 1,
-                token_count: (i + 1) as u32,
-            };
-
-            if stream_sender.send(Ok(chunk)).await.is_err() {
-                debug!("Stream receiver dropped for request {}", request_id);
-                break;
-            }
-
-            // Simulate streaming delay
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    }
 }
 
 impl RequestQueue {
@@ -412,20 +390,24 @@ mod tests {
         };
 
         let manager = Arc::new(ModelManager::new(config).expect("Failed to create ModelManager"));
-        
+
         // Note: We don't actually load the model since dummy GGUF files fail
         // The queue tests should focus on queue functionality, not model loading
         // In a real application, the model would be properly loaded
 
-        // Keep temp_dir alive
-        std::mem::forget(temp_dir);
+        // Note: temp_dir will be automatically cleaned up when it goes out of scope
+        // For test purposes, this is fine as the model manager only needs the path
+        // during initialization, not for the entire lifetime
+        drop(temp_dir);
 
         manager
     }
 
     #[tokio::test]
     async fn test_request_queue_creation() {
-        let model_manager = Arc::new(ModelManager::new(create_test_model_config()).expect("Failed to create ModelManager"));
+        let model_manager = Arc::new(
+            ModelManager::new(create_test_model_config()).expect("Failed to create ModelManager"),
+        );
         let config = create_test_queue_config();
 
         let queue = RequestQueue::new(model_manager, config);
@@ -434,7 +416,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_submit_request_model_not_loaded() {
-        let model_manager = Arc::new(ModelManager::new(create_test_model_config()).expect("Failed to create ModelManager"));
+        let model_manager = Arc::new(
+            ModelManager::new(create_test_model_config()).expect("Failed to create ModelManager"),
+        );
         let config = create_test_queue_config();
         let queue = RequestQueue::new(model_manager, config);
 
@@ -496,7 +480,10 @@ mod tests {
         assert!(chunk_result.is_some());
         match chunk_result.unwrap() {
             Err(QueueError::WorkerError(msg)) => {
-                assert!(msg.contains("Streaming with real models not yet implemented") || msg.contains("Model not loaded"));
+                assert!(
+                    msg.contains("Streaming with real models not yet implemented")
+                        || msg.contains("Model not loaded")
+                );
             }
             Ok(_) => panic!("Expected error for streaming not implemented"),
             Err(other) => panic!("Unexpected error type: {:?}", other),
