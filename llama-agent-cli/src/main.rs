@@ -4,7 +4,10 @@ use llama_agent::{
     model::ModelManager,
     queue::RequestQueue,
     session::SessionManager,
-    types::{ModelConfig, ModelSource, QueueConfig, SessionConfig, GenerationRequest, Message, MessageRole},
+    types::{
+        GenerationRequest, Message, MessageRole, ModelConfig, ModelSource, QueueConfig,
+        SessionConfig,
+    },
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::{error, info};
@@ -29,6 +32,14 @@ struct Args {
     /// Stop generation after this many tokens even without proper stop token
     #[arg(long, default_value = "512")]
     limit: u32,
+
+    /// Batch size for model processing
+    #[arg(long, default_value = "512")]
+    batch_size: u32,
+
+    /// Number of worker threads for queue processing
+    #[arg(long, default_value = "2")]
+    worker_threads: usize,
 }
 
 #[tokio::main]
@@ -66,7 +77,7 @@ async fn run_agent(args: Args) -> Result<String> {
                 folder: PathBuf::from(&args.model),
                 filename: args.filename,
             },
-            batch_size: 512,
+            batch_size: args.batch_size,
             use_hf_params: false,
         }
     } else {
@@ -76,7 +87,7 @@ async fn run_agent(args: Args) -> Result<String> {
                 repo: args.model.clone(),
                 filename: args.filename,
             },
-            batch_size: 512,
+            batch_size: args.batch_size,
             use_hf_params: true,
         }
     };
@@ -85,7 +96,7 @@ async fn run_agent(args: Args) -> Result<String> {
     let queue_config = QueueConfig {
         max_queue_size: 10,
         request_timeout: Duration::from_secs(30),
-        worker_threads: 2,
+        worker_threads: args.worker_threads,
     };
 
     let session_config = SessionConfig {
@@ -110,7 +121,7 @@ async fn run_agent(args: Args) -> Result<String> {
     // Create a new session
     let session = session_manager.create_session().await?;
     let session_id = session.id;
-    
+
     // Add the user message
     let message = Message {
         role: MessageRole::User,
@@ -119,11 +130,13 @@ async fn run_agent(args: Args) -> Result<String> {
         tool_name: None,
         timestamp: std::time::SystemTime::now(),
     };
-    
+
     session_manager.add_message(&session_id, message).await?;
 
     // Get the updated session for generation
-    let updated_session = session_manager.get_session(&session_id).await?
+    let updated_session = session_manager
+        .get_session(&session_id)
+        .await?
         .ok_or_else(|| anyhow::anyhow!("Session not found after adding message"))?;
 
     // Create generation request

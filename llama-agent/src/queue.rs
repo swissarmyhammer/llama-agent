@@ -22,7 +22,6 @@ pub struct RequestQueue {
     sender: mpsc::Sender<QueuedRequest>,
     worker_handles: Vec<JoinHandle<()>>,
     config: QueueConfig,
-    model_manager: Arc<ModelManager>,
 }
 
 impl RequestQueue {
@@ -54,7 +53,6 @@ impl RequestQueue {
             sender,
             worker_handles,
             config,
-            model_manager,
         }
     }
 
