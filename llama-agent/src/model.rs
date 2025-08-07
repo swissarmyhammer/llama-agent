@@ -7,7 +7,7 @@ use llama_cpp_2::{
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 static GLOBAL_BACKEND: OnceLock<Arc<LlamaBackend>> = OnceLock::new();
 
@@ -62,6 +62,9 @@ impl ModelManager {
         info!("🚀 Starting model loading process...");
         info!("Model configuration: {:?}", self.config);
 
+        // Log initial memory usage
+        self.log_memory_usage("model loading start").await;
+
         // Validate config before proceeding
         info!("📋 Validating model configuration...");
         self.config.validate()?;
@@ -86,6 +89,8 @@ impl ModelManager {
             *model_lock = Some(model);
         }
 
+        // Log final memory usage
+        self.log_memory_usage("model loading complete").await;
         info!("🎉 Model loading completed successfully!");
         info!("Model is ready for inference requests");
 
@@ -158,9 +163,9 @@ impl ModelManager {
         use std::num::NonZero;
         let context_params = LlamaContextParams::default()
             .with_n_ctx(Some(
-                NonZero::new(self.config.batch_size.max(2048) as u32).unwrap(),
+                NonZero::new(self.config.batch_size.max(2048)).unwrap(),
             )) // Use at least 2048 context
-            .with_n_batch(self.config.batch_size as u32) // Optimize batch size
+            .with_n_batch(self.config.batch_size) // Optimize batch size
             .with_n_threads(num_cpus::get().min(8) as i32) // Use available CPU cores, capped at 8
             .with_n_threads_batch(num_cpus::get().min(4) as i32) // Optimize batch threads
             .with_embeddings(false) // Disable embeddings for inference-only mode
@@ -293,6 +298,70 @@ impl ModelManager {
             folder.display()
         )))
     }
+
+    /// Get current memory usage information
+    pub fn get_memory_usage(&self) -> MemoryUsageInfo {
+        let process_memory = get_process_memory_usage();
+
+        MemoryUsageInfo {
+            process_memory_mb: process_memory,
+            estimated_model_memory_mb: self.estimate_model_memory(),
+        }
+    }
+
+    /// Estimate model memory usage based on configuration
+    fn estimate_model_memory(&self) -> f64 {
+        // Rough estimation: batch_size * context_size * 4 bytes per float
+        // This is a conservative estimate for memory planning
+        let batch_memory = (self.config.batch_size as f64 * 2048.0 * 4.0) / (1024.0 * 1024.0);
+        batch_memory.max(100.0) // Minimum 100MB estimate
+    }
+
+    /// Log memory usage with performance implications
+    pub async fn log_memory_usage(&self, operation: &str) {
+        let usage = self.get_memory_usage();
+        info!(
+            "📊 Memory usage during {}: Process={}MB, Estimated Model={}MB",
+            operation,
+            usage.process_memory_mb.round(),
+            usage.estimated_model_memory_mb.round()
+        );
+
+        if usage.process_memory_mb > 8000.0 {
+            warn!(
+                "⚠️  High memory usage detected ({}MB). Consider reducing batch_size or model size",
+                usage.process_memory_mb.round()
+            );
+        }
+    }
+}
+
+/// Memory usage information
+#[derive(Debug, Clone)]
+pub struct MemoryUsageInfo {
+    pub process_memory_mb: f64,
+    pub estimated_model_memory_mb: f64,
+}
+
+/// Get current process memory usage in MB
+fn get_process_memory_usage() -> f64 {
+    #[cfg(target_os = "linux")]
+    {
+        use std::fs;
+        if let Ok(status) = fs::read_to_string("/proc/self/status") {
+            for line in status.lines() {
+                if line.starts_with("VmRSS:") {
+                    if let Ok(kb) = line.split_whitespace().nth(1).unwrap_or("0").parse::<f64>() {
+                        return kb / 1024.0; // Convert KB to MB
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback for non-Linux systems or if reading fails
+    // Return a placeholder value to prevent errors in cross-platform development
+    0.0
 }
 
 #[cfg(test)]

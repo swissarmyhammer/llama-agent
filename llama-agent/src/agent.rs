@@ -159,11 +159,16 @@ impl AgentServer {
 
     /// Validate generation request for security and correctness
     fn validate_generation_request(&self, request: &GenerationRequest) -> Result<(), AgentError> {
-        // 1. Validate token limits
+        // 1. Validate token limits with security bounds
         if let Some(max_tokens) = request.max_tokens {
             if max_tokens == 0 {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
                     "max_tokens must be greater than 0".to_string(),
+                )));
+            }
+            if max_tokens > 32768 {
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    format!("max_tokens {} exceeds security limit of 32768", max_tokens),
                 )));
             }
             if max_tokens > 8192 {
@@ -172,20 +177,30 @@ impl AgentServer {
             }
         }
 
-        // 2. Validate temperature range
+        // 2. Validate temperature range with finite check
         if let Some(temperature) = request.temperature {
+            if !temperature.is_finite() {
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    "temperature must be a finite number".to_string(),
+                )));
+            }
             if !(0.0..=2.0).contains(&temperature) {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "temperature must be between 0.0 and 2.0".to_string(),
+                    format!("temperature {} must be between 0.0 and 2.0", temperature),
                 )));
             }
         }
 
-        // 3. Validate top_p range
+        // 3. Validate top_p range with finite check
         if let Some(top_p) = request.top_p {
+            if !top_p.is_finite() {
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    "top_p must be a finite number".to_string(),
+                )));
+            }
             if !(0.0..=1.0).contains(&top_p) {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "top_p must be between 0.0 and 1.0".to_string(),
+                    format!("top_p {} must be between 0.0 and 1.0", top_p),
                 )));
             }
         }
@@ -205,7 +220,16 @@ impl AgentServer {
             )));
         }
 
-        // 5. Validate stop tokens
+        // 5. Validate stop tokens with security limits
+        if request.stop_tokens.len() > 20 {
+            return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                format!(
+                    "too many stop tokens: {} (maximum 20 allowed)",
+                    request.stop_tokens.len()
+                ),
+            )));
+        }
+
         for stop_token in &request.stop_tokens {
             if stop_token.is_empty() {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
@@ -214,7 +238,7 @@ impl AgentServer {
             }
             if stop_token.len() > 100 {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "stop tokens cannot exceed 100 characters".to_string(),
+                    format!("stop token '{}' exceeds 100 character limit", stop_token),
                 )));
             }
         }
@@ -238,15 +262,35 @@ impl AgentServer {
             // Check for potential prompt injection patterns
             let content_lower = message.content.to_lowercase();
             let suspicious_patterns = [
+                // Prompt injection patterns
                 "ignore previous instructions",
                 "disregard all",
+                "forget everything",
+                "new instructions:",
                 "system:",
+                "assistant:",
+                "you are now",
+                "pretend to be",
+                // Code injection patterns
                 "<script",
+                "</script>",
                 "javascript:",
                 "eval(",
                 "exec(",
                 "subprocess",
                 "__import__",
+                "os.system",
+                "shell_exec",
+                // Path traversal patterns
+                "../",
+                "..\\",
+                "/etc/passwd",
+                "c:\\windows\\system32",
+                // XSS patterns
+                "onload=",
+                "onerror=",
+                "onclick=",
+                "document.cookie",
             ];
 
             for pattern in &suspicious_patterns {
@@ -270,6 +314,54 @@ impl AgentServer {
                     "message contains excessive repetition".to_string(),
                 )));
             }
+        }
+
+        // 7. Additional security validation
+        self.validate_security_limits(request)?;
+
+        Ok(())
+    }
+
+    /// Additional security validation for resource limits
+    fn validate_security_limits(&self, request: &GenerationRequest) -> Result<(), AgentError> {
+        // 1. Check for potential DoS through large context windows
+        let context_tokens = request.session.messages.len() * 50; // Rough estimate
+        if context_tokens > 100_000 {
+            return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                format!(
+                    "estimated context size {} tokens exceeds security limit",
+                    context_tokens
+                ),
+            )));
+        }
+
+        // 2. Validate session has reasonable message count
+        if request.session.messages.len() > 1000 {
+            return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                format!(
+                    "session message count {} exceeds limit of 1000",
+                    request.session.messages.len()
+                ),
+            )));
+        }
+
+        // 3. Check for potential memory exhaustion attacks
+        let total_request_size = serde_json::to_string(request)
+            .map_err(|_| {
+                AgentError::Template(crate::types::TemplateError::Invalid(
+                    "failed to serialize request for security validation".to_string(),
+                ))
+            })?
+            .len();
+
+        if total_request_size > 5_000_000 {
+            // 5MB limit for entire request
+            return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                format!(
+                    "request size {} bytes exceeds security limit of 5MB",
+                    total_request_size
+                ),
+            )));
         }
 
         Ok(())
