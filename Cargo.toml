@@ -38,6 +38,9 @@ async-trait = "0.1"
 # Futures
 futures = "0.3"
 
+# HuggingFace integration
+hf-hub = { version = "0.3", default-features = false, features = ["tokio", "online"] }
+
 # Test dependencies
 tempfile = "3.0"
 proptest = "1.0"

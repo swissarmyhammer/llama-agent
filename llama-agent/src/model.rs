@@ -1,4 +1,5 @@
 use crate::types::{ModelConfig, ModelError, ModelSource};
+use hf_hub::api::tokio::ApiBuilder;
 use llama_cpp_2::{
     context::{params::LlamaContextParams, LlamaContext},
     llama_backend::LlamaBackend,
@@ -213,24 +214,35 @@ impl ModelManager {
         repo: &str,
         filename: Option<&str>,
     ) -> Result<LlamaModel, ModelError> {
-        // For now, HuggingFace integration is not available in llama-cpp-2
-        // We'll treat the repo as a local path as fallback with performance optimization
-        info!(
-            "HuggingFace integration not available, treating repo as local path: {}",
-            repo
-        );
+        info!("Starting HuggingFace model download/loading for: {}", repo);
 
-        let repo_path = PathBuf::from(repo);
+        // Build HuggingFace API client with progress indication
+        let api = ApiBuilder::new().with_progress(true).build().map_err(|e| {
+            ModelError::LoadingFailed(format!("Failed to initialize HuggingFace API: {}", e))
+        })?;
 
-        // Pre-validate path exists before expensive model loading
-        if !repo_path.exists() {
-            return Err(ModelError::NotFound(format!(
-                "HuggingFace repo path does not exist: {}",
-                repo_path.display()
-            )));
-        }
+        let hf_repo = api.model(repo.to_string());
 
-        self.load_local_model(&repo_path, filename).await
+        let model_path = if let Some(filename) = filename {
+            info!("Downloading specific model file: {}", filename);
+            hf_repo.get(filename).await.map_err(|e| {
+                ModelError::LoadingFailed(format!(
+                    "Failed to download model file '{}' from HuggingFace repo '{}': {}",
+                    filename, repo, e
+                ))
+            })?
+        } else {
+            info!(
+                "Auto-detecting GGUF files in HuggingFace repository: {}",
+                repo
+            );
+            self.download_auto_detect_gguf(&hf_repo, repo).await?
+        };
+
+        info!("Model downloaded to: {:?}", model_path);
+
+        // Load the downloaded model using the existing local model loading logic
+        self.load_model_from_file(&model_path).await
     }
 
     async fn load_local_model(
@@ -254,16 +266,81 @@ impl ModelManager {
             self.auto_detect_model_file(folder).await?
         };
 
+        self.load_model_from_file(&model_path).await
+    }
+
+    async fn download_auto_detect_gguf(
+        &self,
+        hf_repo: &hf_hub::api::tokio::ApiRepo,
+        repo_name: &str,
+    ) -> Result<PathBuf, ModelError> {
+        // Try to list files in the repository to find GGUF files
+        // Since hf-hub doesn't provide a direct listing API, we'll try common GGUF filenames
+        // Based on the repo name, try to derive model-specific patterns first
+        let mut common_gguf_patterns = Vec::new();
+
+        // Extract potential model name from repo (e.g., "unsloth/Qwen3-0.6B-GGUF" -> "Qwen3-0.6B")
+        if let Some(model_part) = repo_name.split('/').last() {
+            let base_name = model_part.replace("-GGUF", "");
+            // Add common quantization patterns for this specific model
+            common_gguf_patterns.extend([
+                format!("{}-BF16.gguf", base_name),
+                format!("{}-Q4_K_M.gguf", base_name),
+                format!("{}-Q4_0.gguf", base_name),
+                format!("{}-Q4_1.gguf", base_name),
+                format!("{}-Q5_K_M.gguf", base_name),
+                format!("{}-Q5_K_S.gguf", base_name),
+                format!("{}-Q8_0.gguf", base_name),
+                format!("{}-Q6_K.gguf", base_name),
+                format!("{}-Q3_K_M.gguf", base_name),
+                format!("{}-Q2_K.gguf", base_name),
+            ]);
+        }
+
+        // Add fallback generic patterns
+        common_gguf_patterns.extend([
+            "model.gguf".to_string(),
+            "ggml-model.gguf".to_string(),
+            "ggml-model-q4_0.gguf".to_string(),
+            "ggml-model-q4_1.gguf".to_string(),
+            "ggml-model-q5_0.gguf".to_string(),
+            "ggml-model-q5_1.gguf".to_string(),
+            "ggml-model-q8_0.gguf".to_string(),
+            "ggml-model-f16.gguf".to_string(),
+            "ggml-model-f32.gguf".to_string(),
+        ]);
+
+        for pattern in &common_gguf_patterns {
+            info!("Trying to download: {}", pattern);
+            match hf_repo.get(pattern).await {
+                Ok(path) => {
+                    info!("Successfully found and downloaded: {}", pattern);
+                    return Ok(path);
+                }
+                Err(_) => {
+                    debug!("File '{}' not found, trying next pattern", pattern);
+                    continue;
+                }
+            }
+        }
+
+        Err(ModelError::NotFound(format!(
+            "No common GGUF model files found in HuggingFace repo: {}. \
+            Try specifying a filename explicitly or check the repository contents.",
+            repo_name
+        )))
+    }
+
+    async fn load_model_from_file(&self, model_path: &Path) -> Result<LlamaModel, ModelError> {
         info!("Loading model from path: {:?}", model_path);
+
         // Optimize model loading with performance parameters
         let model_params = LlamaModelParams::default();
-        // Note: Memory mapping optimization would be configured here if available in this version
-
         info!("⚙️  Loading model with optimized parameters (memory mapping enabled)");
         info!("📁 Model file: {}", model_path.display());
 
         let model =
-            LlamaModel::load_from_file(&self.backend, &model_path, &model_params).map_err(|e| {
+            LlamaModel::load_from_file(&self.backend, model_path, &model_params).map_err(|e| {
                 ModelError::LoadingFailed(format!(
                     "Failed to load model from {}: {}",
                     model_path.display(),
