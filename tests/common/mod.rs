@@ -7,8 +7,10 @@ use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 /// Test utilities and common setup functions
+#[allow(dead_code)]
 pub struct TestHelper;
 
+#[allow(dead_code)]
 impl TestHelper {
     /// Create a minimal test configuration for testing
     pub fn minimal_config() -> AgentConfig {

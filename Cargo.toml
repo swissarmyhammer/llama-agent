@@ -61,3 +61,23 @@ mockall = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 ulid = { workspace = true }
+
+# Performance optimized release profile
+[profile.release]
+opt-level = 3
+debug = false
+strip = true
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+# Optimized development profile for better performance during development
+[profile.dev]
+opt-level = 1
+debug = true
+overflow-checks = true
+
+# Optimized test profile for faster test execution
+[profile.test]
+opt-level = 1
+debug = true

@@ -44,3 +44,7 @@ tmp
 
 # FastEmbed cache directory
 .fastembed_cache/
+
+# Code review and temporary documentation files
+CODE_REVIEW.md
+REVIEW_*.md

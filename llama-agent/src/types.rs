@@ -494,79 +494,79 @@ pub enum AgentError {
     #[error("Template error: {0}")]
     Template(#[from] TemplateError),
 
-    #[error("Timeout: request took longer than {timeout:?}")]
+    #[error("Request timeout: Operation took longer than {timeout:?}. Try reducing the request complexity or increasing the timeout value.")]
     Timeout { timeout: Duration },
 
-    #[error("Queue full: maximum capacity {capacity} exceeded")]
+    #[error("Request queue full: Maximum capacity of {capacity} requests exceeded. Please wait for pending requests to complete or increase queue capacity.")]
     QueueFull { capacity: usize },
 }
 
 #[derive(Debug, Error)]
 pub enum ModelError {
-    #[error("Model loading failed: {0}")]
+    #[error("Failed to load model: {0}. Check model path, format (should be .gguf), and ensure sufficient memory is available.")]
     LoadingFailed(String),
 
-    #[error("Model not found at source: {0}")]
+    #[error("Model not found: {0}. Verify the model path exists and the filename is correct.")]
     NotFound(String),
 
-    #[error("Invalid model configuration: {0}")]
+    #[error("Invalid model configuration: {0}. Check batch size (>0), model source path, and file extension.")]
     InvalidConfig(String),
 
-    #[error("Model inference failed: {0}")]
+    #[error("Model inference failed: {0}. This may indicate insufficient resources or an incompatible model format.")]
     InferenceFailed(String),
 }
 
 #[derive(Debug, Clone, Error)]
 pub enum QueueError {
-    #[error("Queue is full")]
+    #[error("Request queue is full. Try again later or increase queue capacity in configuration.")]
     Full,
 
-    #[error("Request timeout")]
+    #[error("Request timeout. The operation took too long to complete. Consider reducing request complexity or increasing timeout.")]
     Timeout,
 
-    #[error("Worker thread error: {0}")]
+    #[error("Processing error: {0}. Check logs for detailed error information.")]
     WorkerError(String),
 }
 
 #[derive(Debug, Error)]
 pub enum SessionError {
-    #[error("Session not found: {0}")]
+    #[error("Session not found: {0}. The session may have expired or been removed. Create a new session to continue.")]
     NotFound(String),
 
-    #[error("Session limit exceeded")]
+    #[error("Session limit exceeded. Close unused sessions or increase the maximum session limit in configuration.")]
     LimitExceeded,
 
-    #[error("Session timeout")]
+    #[error("Session timed out due to inactivity. Create a new session to continue.")]
     Timeout,
 
-    #[error("Invalid session state: {0}")]
+    #[error("Invalid session state: {0}. This may indicate corrupted session data.")]
     InvalidState(String),
 }
 
 #[derive(Debug, Error)]
 pub enum MCPError {
-    #[error("MCP server not found: {0}")]
+    #[error("MCP server '{0}' not found. Check server configuration and ensure it's properly initialized.")]
     ServerNotFound(String),
 
-    #[error("Tool call failed: {0}")]
+    #[error("Tool execution failed: {0}. Verify tool arguments and ensure the MCP server is running properly.")]
     ToolCallFailed(String),
 
-    #[error("Connection error: {0}")]
+    #[error("MCP server connection error: {0}. Check server status and network connectivity.")]
     Connection(String),
 
-    #[error("Protocol error: {0}")]
+    #[error("MCP protocol error: {0}. This may indicate incompatible server version or malformed request.")]
     Protocol(String),
 }
 
 #[derive(Debug, Error)]
 pub enum TemplateError {
-    #[error("Template rendering failed: {0}")]
+    #[error("Template rendering failed: {0}. Check template syntax and provided variables.")]
     RenderingFailed(String),
 
-    #[error("Tool call parsing failed: {0}")]
+    #[error("Failed to parse tool calls: {0}. Check the format of tool call requests in the generated text.")]
     ToolCallParsing(String),
 
-    #[error("Invalid template: {0}")]
+    #[error("Invalid template format: {0}. Verify template syntax is correct.")]
     Invalid(String),
 }
 
