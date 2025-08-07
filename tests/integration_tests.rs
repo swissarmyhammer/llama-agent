@@ -379,7 +379,7 @@ async fn test_timeout_scenarios() {
             assert!(result.is_ok()); // Timeout should complete, but request should fail
 
             match result.unwrap() {
-                Err(QueueError::Timeout) => {
+                Err(QueueError::Timeout { duration: _ }) => {
                     // Expected timeout
                 }
                 Err(QueueError::WorkerError(_)) => {

@@ -106,7 +106,8 @@ impl AgentServer {
             );
 
             Ok::<(), AgentError>(())
-        }).await;
+        })
+        .await;
 
         match result {
             Ok(Ok(())) => {
@@ -119,7 +120,7 @@ impl AgentServer {
             }
             Err(_timeout) => {
                 warn!(
-                    "Shutdown timed out after {:?}, forcing exit", 
+                    "Shutdown timed out after {:?}, forcing exit",
                     shutdown_timeout
                 );
                 // Force cleanup - this is not ideal but prevents hanging
@@ -128,13 +129,41 @@ impl AgentServer {
         }
     }
 
+    /// Check if text contains excessive repetition (potential DoS attack)
+    fn has_excessive_repetition(text: &str) -> bool {
+        if text.len() < 100 {
+            return false;
+        }
+
+        let chars: Vec<char> = text.chars().collect();
+        let mut repetition_count = 0;
+        let window_size = 50; // Check 50-character windows
+
+        for i in 0..(chars.len().saturating_sub(window_size * 2)) {
+            let pattern = &chars[i..i + window_size];
+            let next_window = &chars[i + window_size..i + window_size * 2];
+
+            if pattern == next_window {
+                repetition_count += 1;
+                if repetition_count > 5 {
+                    // Allow some repetition but not excessive
+                    return true;
+                }
+            } else {
+                repetition_count = 0;
+            }
+        }
+
+        false
+    }
+
     /// Validate generation request for security and correctness
     fn validate_generation_request(&self, request: &GenerationRequest) -> Result<(), AgentError> {
         // 1. Validate token limits
         if let Some(max_tokens) = request.max_tokens {
             if max_tokens == 0 {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "max_tokens must be greater than 0".to_string()
+                    "max_tokens must be greater than 0".to_string(),
                 )));
             }
             if max_tokens > 8192 {
@@ -147,7 +176,7 @@ impl AgentServer {
         if let Some(temperature) = request.temperature {
             if !(0.0..=2.0).contains(&temperature) {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "temperature must be between 0.0 and 2.0".to_string()
+                    "temperature must be between 0.0 and 2.0".to_string(),
                 )));
             }
         }
@@ -156,19 +185,23 @@ impl AgentServer {
         if let Some(top_p) = request.top_p {
             if !(0.0..=1.0).contains(&top_p) {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "top_p must be between 0.0 and 1.0".to_string()
+                    "top_p must be between 0.0 and 1.0".to_string(),
                 )));
             }
         }
 
         // 4. Validate session content size
-        let total_content_size: usize = request.session.messages.iter()
+        let total_content_size: usize = request
+            .session
+            .messages
+            .iter()
             .map(|m| m.content.len())
             .sum();
-        
-        if total_content_size > 1_000_000 { // 1MB limit
+
+        if total_content_size > 1_000_000 {
+            // 1MB limit
             return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                "session content exceeds maximum size limit".to_string()
+                "session content exceeds maximum size limit".to_string(),
             )));
         }
 
@@ -176,28 +209,65 @@ impl AgentServer {
         for stop_token in &request.stop_tokens {
             if stop_token.is_empty() {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "stop tokens cannot be empty".to_string()
+                    "stop tokens cannot be empty".to_string(),
                 )));
             }
             if stop_token.len() > 100 {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "stop tokens cannot exceed 100 characters".to_string()
+                    "stop tokens cannot exceed 100 characters".to_string(),
                 )));
             }
         }
 
         // 6. Validate message content for potential injection
         for message in &request.session.messages {
-            if message.content.len() > 100_000 { // 100KB per message
+            if message.content.len() > 100_000 {
+                // 100KB per message
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "individual message exceeds size limit".to_string()
+                    "individual message exceeds size limit".to_string(),
                 )));
             }
 
-            // Check for suspicious patterns (basic injection detection)
+            // Enhanced security validation - check for suspicious patterns
             if message.content.contains('\0') {
                 return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "message content contains null bytes".to_string()
+                    "message content contains null bytes".to_string(),
+                )));
+            }
+
+            // Check for potential prompt injection patterns
+            let content_lower = message.content.to_lowercase();
+            let suspicious_patterns = [
+                "ignore previous instructions",
+                "disregard all",
+                "system:",
+                "<script",
+                "javascript:",
+                "eval(",
+                "exec(",
+                "subprocess",
+                "__import__",
+            ];
+
+            for pattern in &suspicious_patterns {
+                if content_lower.contains(pattern) {
+                    warn!(
+                        "Potentially suspicious content detected in message: contains '{}'",
+                        pattern
+                    );
+                    // Log but don't block - allow legitimate use cases
+                    debug!(
+                        "Full message content (first 200 chars): {}",
+                        &message.content.chars().take(200).collect::<String>()
+                    );
+                }
+            }
+
+            // Check for excessive repetition (potential DoS attempt)
+            if Self::has_excessive_repetition(&message.content) {
+                warn!("Message contains excessive repetition - potential DoS attempt");
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    "message contains excessive repetition".to_string(),
                 )));
             }
         }
@@ -211,7 +281,32 @@ impl AgentServer {
         tool_call: &ToolCall,
         tool_def: &crate::types::ToolDefinition,
     ) -> Result<(), String> {
-        // If no parameters schema is defined, skip validation
+        // Security check: validate tool name format
+        if tool_call.name.is_empty() || tool_call.name.len() > 100 {
+            return Err("Tool name must be 1-100 characters".to_string());
+        }
+
+        // Check for potentially dangerous tool names
+        let dangerous_patterns = [
+            "exec",
+            "eval",
+            "system",
+            "shell",
+            "cmd",
+            "powershell",
+            "bash",
+        ];
+        for pattern in &dangerous_patterns {
+            if tool_call.name.to_lowercase().contains(pattern) {
+                warn!(
+                    "Potentially dangerous tool call detected: {}",
+                    tool_call.name
+                );
+                // Log but allow - some legitimate tools might match
+            }
+        }
+
+        // If no parameters schema is defined, skip schema validation
         if tool_def.parameters.is_null() {
             debug!("No parameter schema defined for tool '{}'", tool_call.name);
             return Ok(());
@@ -222,13 +317,38 @@ impl AgentServer {
             return Err("Tool requires arguments but none provided".to_string());
         }
 
-        // Additional validation could be added here:
-        // - JSON Schema validation against tool_def.parameters
-        // - Type checking for required fields
-        // - Range validation for numeric parameters
+        // Security validation of argument content
+        if let Ok(args_str) = serde_json::to_string(&tool_call.arguments) {
+            // Check argument size
+            if args_str.len() > 10_000 {
+                // 10KB limit
+                return Err("Tool arguments exceed maximum size limit".to_string());
+            }
+
+            // Check for suspicious content in arguments
+            let args_lower = args_str.to_lowercase();
+            let suspicious_args = [
+                "../",
+                "..\\",
+                "/etc/",
+                "c:\\windows",
+                "rm -rf",
+                "del /",
+                "format c:",
+            ];
+            for pattern in &suspicious_args {
+                if args_lower.contains(pattern) {
+                    warn!(
+                        "Suspicious content in tool arguments for '{}': contains '{}'",
+                        tool_call.name, pattern
+                    );
+                    // Log suspicious content but continue - might be legitimate
+                }
+            }
+        }
 
         debug!(
-            "Tool arguments validation passed for '{}' (basic validation only)",
+            "Tool arguments validation passed for '{}' (enhanced security checks applied)",
             tool_call.name
         );
         Ok(())

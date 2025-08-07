@@ -503,28 +503,28 @@ pub enum AgentError {
 
 #[derive(Debug, Error)]
 pub enum ModelError {
-    #[error("Failed to load model: {0}. Check model path, format (should be .gguf), and ensure sufficient memory is available.")]
+    #[error("Failed to load model: {0}. \n\nTroubleshooting steps:\n• Verify model format is .gguf (GGML Unified Format)\n• Check available system memory (models require 4-16GB typically)\n• Ensure model file is not corrupted (re-download if needed)\n• Try reducing batch size or context length in configuration")]
     LoadingFailed(String),
 
-    #[error("Model not found: {0}. Verify the model path exists and the filename is correct.")]
+    #[error("Model not found: {0}. \n\nPlease check:\n• Model file path exists and is readable\n• Filename matches exactly (case-sensitive)\n• File permissions allow read access\n• For HuggingFace repos: verify repo name and model file exists")]
     NotFound(String),
 
-    #[error("Invalid model configuration: {0}. Check batch size (>0), model source path, and file extension.")]
+    #[error("Invalid model configuration: {0}. \n\nConfiguration requirements:\n• batch_size must be > 0 (recommended: 512-2048)\n• Model path must be absolute or relative to current directory\n• File extension must be .gguf\n• HuggingFace repo format: 'username/repo-name'")]
     InvalidConfig(String),
 
-    #[error("Model inference failed: {0}. This may indicate insufficient resources or an incompatible model format.")]
+    #[error("Model inference failed: {0}. \n\nPossible causes:\n• Insufficient system memory or GPU memory\n• Model format incompatible with current version\n• Context length exceeds model's maximum\n• Hardware acceleration (Metal/CUDA) unavailable")]
     InferenceFailed(String),
 }
 
 #[derive(Debug, Clone, Error)]
 pub enum QueueError {
-    #[error("Request queue is full. Try again later or increase queue capacity in configuration.")]
-    Full,
+    #[error("Request queue is full (all {capacity} slots occupied). \n\nOptions:\n• Wait a few seconds and retry\n• Increase max_queue_size in configuration\n• Reduce concurrent request load\n• Check if requests are processing normally (use health check)")]
+    Full { capacity: usize },
 
-    #[error("Request timeout. The operation took too long to complete. Consider reducing request complexity or increasing timeout.")]
-    Timeout,
+    #[error("Request timeout after {duration:?}. \n\nSuggestions:\n• Reduce max_tokens in the request\n• Simplify the prompt or conversation context\n• Increase request_timeout in queue configuration\n• Check system resources (CPU/memory usage)")]
+    Timeout { duration: Duration },
 
-    #[error("Processing error: {0}. Check logs for detailed error information.")]
+    #[error("Processing error: {0}. \n\nDebugging steps:\n• Check detailed logs for stack trace\n• Verify model is properly loaded and accessible\n• Ensure sufficient system resources\n• Try with a simpler request to isolate the issue")]
     WorkerError(String),
 }
 
