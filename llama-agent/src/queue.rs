@@ -18,6 +18,28 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use ulid::Ulid;
 
+struct StreamingContext<'a> {
+    worker_id: usize,
+    request_id: String,
+    request: &'a GenerationRequest,
+    model: &'a LlamaModel,
+    model_manager: &'a ModelManager,
+    stream_sender: mpsc::Sender<Result<StreamChunk, QueueError>>,
+    cancellation_token: &'a CancellationToken,
+    chat_template: &'a ChatTemplateEngine,
+}
+
+struct CompletionContext<'a> {
+    worker_id: usize,
+    request_id: String,
+    generated_text: &'a str,
+    tokens_generated: u32,
+    start_time: Instant,
+    stream_sender: &'a mpsc::Sender<Result<StreamChunk, QueueError>>,
+    chat_template: &'a ChatTemplateEngine,
+    base_reason: &'a str,
+}
+
 #[derive(Debug, Default)]
 pub struct QueueMetrics {
     pub total_requests: AtomicU64,
@@ -220,7 +242,9 @@ impl RequestQueue {
         request: GenerationRequest,
     ) -> Result<mpsc::Receiver<Result<StreamChunk, QueueError>>, QueueError> {
         let (response_sender, _) = oneshot::channel();
-        let (stream_sender, stream_receiver) = mpsc::channel(100);
+        // Use larger buffer for streaming to prevent backpressure
+        let buffer_size = std::cmp::max(100, request.max_tokens.unwrap_or(512) as usize);
+        let (stream_sender, stream_receiver) = mpsc::channel(buffer_size);
 
         let queued_request = QueuedRequest {
             id: Ulid::new().to_string(),
@@ -355,16 +379,16 @@ impl RequestQueue {
             let result = model_manager
                 .with_model(|model| {
                     // Process the streaming request synchronously within the model lifetime
-                    Self::process_streaming_request_sync(
+                    Self::process_streaming_request_sync(StreamingContext {
                         worker_id,
-                        request_id.clone(),
-                        &queued_request.request,
+                        request_id: request_id.clone(),
+                        request: &queued_request.request,
                         model,
-                        &model_manager,
-                        stream_sender.clone(),
-                        &queued_request.cancellation_token,
-                        &chat_template,
-                    )
+                        model_manager: &model_manager,
+                        stream_sender: stream_sender.clone(),
+                        cancellation_token: &queued_request.cancellation_token,
+                        chat_template: &chat_template,
+                    })
                 })
                 .await;
 
@@ -479,8 +503,8 @@ impl RequestQueue {
 
         debug!("Tokenized prompt to {} tokens", tokens_list.len());
 
-        // Create batch for initial prompt processing
-        let batch_size = 512;
+        // Create batch for initial prompt processing with optimized size
+        let batch_size = tokens_list.len().clamp(512, 1024);
         let mut batch = LlamaBatch::new(batch_size, 1);
 
         // Add prompt tokens to batch
@@ -623,25 +647,40 @@ impl RequestQueue {
     }
 
     fn format_session_prompt(session: &Session) -> Result<String, QueueError> {
-        let mut prompt = String::new();
+        // Pre-calculate capacity to reduce reallocations
+        let estimated_capacity = session.messages.iter()
+            .map(|m| m.content.len() + 50) // Role prefix + content + buffer
+            .sum::<usize>() + 100; // Additional buffer for "Assistant:" suffix
+        
+        let mut prompt = String::with_capacity(estimated_capacity);
 
         for message in &session.messages {
             match message.role {
                 MessageRole::System => {
-                    prompt.push_str(&format!("System: {}\n", message.content));
+                    prompt.push_str("System: ");
+                    prompt.push_str(&message.content);
+                    prompt.push('\n');
                 }
                 MessageRole::User => {
-                    prompt.push_str(&format!("User: {}\n", message.content));
+                    prompt.push_str("User: ");
+                    prompt.push_str(&message.content);
+                    prompt.push('\n');
                 }
                 MessageRole::Assistant => {
-                    prompt.push_str(&format!("Assistant: {}\n", message.content));
+                    prompt.push_str("Assistant: ");
+                    prompt.push_str(&message.content);
+                    prompt.push('\n');
                 }
                 MessageRole::Tool => {
                     if let Some(tool_name) = &message.tool_name {
-                        prompt.push_str(&format!("Tool ({}): {}\n", tool_name, message.content));
+                        prompt.push_str("Tool (");
+                        prompt.push_str(tool_name);
+                        prompt.push_str("): ");
                     } else {
-                        prompt.push_str(&format!("Tool: {}\n", message.content));
+                        prompt.push_str("Tool: ");
                     }
+                    prompt.push_str(&message.content);
+                    prompt.push('\n');
                 }
             }
         }
@@ -661,16 +700,17 @@ impl RequestQueue {
         false
     }
 
-    fn process_streaming_request_sync(
-        worker_id: usize,
-        request_id: String,
-        request: &GenerationRequest,
-        model: &LlamaModel,
-        model_manager: &ModelManager,
-        stream_sender: mpsc::Sender<Result<StreamChunk, QueueError>>,
-        cancellation_token: &CancellationToken,
-        chat_template: &ChatTemplateEngine,
-    ) -> Result<(), QueueError> {
+    fn process_streaming_request_sync(context: StreamingContext<'_>) -> Result<(), QueueError> {
+        let StreamingContext {
+            worker_id,
+            request_id,
+            request,
+            model,
+            model_manager,
+            stream_sender,
+            cancellation_token,
+            chat_template,
+        } = context;
         let start_time = Instant::now();
 
         debug!(
@@ -713,8 +753,8 @@ impl RequestQueue {
             tokens_list.len()
         );
 
-        // Create and process initial batch
-        let batch_size = 512;
+        // Create and process initial batch with optimized size
+        let batch_size = tokens_list.len().clamp(512, 1024);
         let mut batch = LlamaBatch::new(batch_size, 1);
 
         // Add prompt tokens to batch
@@ -749,7 +789,9 @@ impl RequestQueue {
         ]);
 
         let max_tokens = request.max_tokens.unwrap_or(512);
-        let mut generated_text = String::new();
+        // Pre-allocate string capacity based on expected output size
+        let estimated_chars = (max_tokens as usize) * 4; // Rough estimate: 4 chars per token
+        let mut generated_text = String::with_capacity(estimated_chars);
         let mut tokens_generated = 0u32;
         let mut n_cur = tokens_list.len();
 
@@ -772,16 +814,16 @@ impl RequestQueue {
 
             // Check for end of sequence token
             if model.is_eog_token(token) {
-                return Self::handle_streaming_completion(
+                return Self::handle_streaming_completion(CompletionContext {
                     worker_id,
                     request_id,
-                    &generated_text,
+                    generated_text: &generated_text,
                     tokens_generated,
                     start_time,
-                    &stream_sender,
+                    stream_sender: &stream_sender,
                     chat_template,
-                    "EndOfSequence",
-                );
+                    base_reason: "EndOfSequence",
+                });
             }
 
             // Convert token to string
@@ -810,16 +852,16 @@ impl RequestQueue {
 
             // Check for stop tokens in the accumulated generated text
             if Self::should_stop(&generated_text, &request.stop_tokens) {
-                return Self::handle_streaming_completion(
+                return Self::handle_streaming_completion(CompletionContext {
                     worker_id,
                     request_id,
-                    &generated_text,
+                    generated_text: &generated_text,
                     tokens_generated,
                     start_time,
-                    &stream_sender,
+                    stream_sender: &stream_sender,
                     chat_template,
-                    "StopToken",
-                );
+                    base_reason: "StopToken",
+                });
             }
 
             // Prepare next batch for continued generation
@@ -839,29 +881,30 @@ impl RequestQueue {
         }
 
         // If we exit the loop due to max tokens, send final completion chunk
-        Self::handle_streaming_completion(
+        Self::handle_streaming_completion(CompletionContext {
             worker_id,
             request_id,
-            &generated_text,
+            generated_text: &generated_text,
             tokens_generated,
             start_time,
-            &stream_sender,
+            stream_sender: &stream_sender,
             chat_template,
-            "MaxTokens",
-        )
+            base_reason: "MaxTokens",
+        })
     }
 
     /// Handle completion of streaming request with tool call detection
-    fn handle_streaming_completion(
-        worker_id: usize,
-        request_id: String,
-        generated_text: &str,
-        tokens_generated: u32,
-        start_time: Instant,
-        stream_sender: &mpsc::Sender<Result<StreamChunk, QueueError>>,
-        chat_template: &ChatTemplateEngine,
-        base_reason: &str,
-    ) -> Result<(), QueueError> {
+    fn handle_streaming_completion(context: CompletionContext<'_>) -> Result<(), QueueError> {
+        let CompletionContext {
+            worker_id,
+            request_id,
+            generated_text,
+            tokens_generated,
+            start_time,
+            stream_sender,
+            chat_template,
+            base_reason,
+        } = context;
         // Check if the generated text contains tool calls
         let has_tool_calls = match chat_template.extract_tool_calls(generated_text) {
             Ok(tool_calls) if !tool_calls.is_empty() => {

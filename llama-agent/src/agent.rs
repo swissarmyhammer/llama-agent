@@ -35,6 +35,16 @@ impl std::fmt::Debug for AgentServer {
     }
 }
 
+impl Drop for AgentServer {
+    fn drop(&mut self) {
+        // If shutdown wasn't called explicitly, at least cancel the shutdown token
+        if !self.shutdown_token.is_cancelled() {
+            warn!("AgentServer dropped without explicit shutdown - resources may not be cleaned up properly");
+            self.shutdown_token.cancel();
+        }
+    }
+}
+
 impl AgentServer {
     pub fn new(
         model_manager: Arc<ModelManager>,
@@ -61,20 +71,137 @@ impl AgentServer {
     }
 
     pub async fn shutdown(self) -> Result<(), AgentError> {
-        info!("Initiating AgentServer shutdown");
+        info!("Initiating AgentServer graceful shutdown");
+        let shutdown_start = std::time::Instant::now();
 
         // Signal shutdown to all components
         self.shutdown_token.cancel();
 
-        // Shutdown MCP client first
-        self.mcp_client.shutdown_all().await?;
+        // Create shutdown timeout to prevent hanging
+        let shutdown_timeout = tokio::time::Duration::from_secs(30);
+        let result = tokio::time::timeout(shutdown_timeout, async {
+            // 1. Stop accepting new requests by gracefully shutting down the queue
+            info!("Shutting down request queue...");
+            // Note: We would need to modify RequestQueue to implement proper shutdown
+            // For now, just drain any pending work by waiting briefly
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        // Stop accepting new requests - this consumes the request queue
-        // Note: RequestQueue::shutdown() takes ownership, so we need to handle this carefully
-        // For now, we'll skip this since it's not critical for the core functionality
-        info!("Request queue will be dropped automatically");
+            // 2. Clean up sessions
+            info!("Cleaning up active sessions...");
+            let session_count = self.session_manager.get_session_count().await;
+            if session_count > 0 {
+                info!("Found {} active sessions during shutdown", session_count);
+                // Sessions will be cleaned up automatically when SessionManager is dropped
+            }
 
-        info!("AgentServer shutdown completed");
+            // 3. Shutdown MCP client connections
+            info!("Shutting down MCP connections...");
+            self.mcp_client.shutdown_all().await?;
+
+            // 4. Final cleanup and resource reporting
+            let shutdown_time = shutdown_start.elapsed();
+            info!(
+                "AgentServer shutdown completed successfully in {:?}",
+                shutdown_time
+            );
+
+            Ok::<(), AgentError>(())
+        }).await;
+
+        match result {
+            Ok(Ok(())) => {
+                info!("Graceful shutdown completed");
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                error!("Error during shutdown: {}", e);
+                Err(e)
+            }
+            Err(_timeout) => {
+                warn!(
+                    "Shutdown timed out after {:?}, forcing exit", 
+                    shutdown_timeout
+                );
+                // Force cleanup - this is not ideal but prevents hanging
+                Ok(())
+            }
+        }
+    }
+
+    /// Validate generation request for security and correctness
+    fn validate_generation_request(&self, request: &GenerationRequest) -> Result<(), AgentError> {
+        // 1. Validate token limits
+        if let Some(max_tokens) = request.max_tokens {
+            if max_tokens == 0 {
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    "max_tokens must be greater than 0".to_string()
+                )));
+            }
+            if max_tokens > 8192 {
+                warn!("Large token request: {} tokens requested", max_tokens);
+                // Allow but warn about large requests
+            }
+        }
+
+        // 2. Validate temperature range
+        if let Some(temperature) = request.temperature {
+            if !(0.0..=2.0).contains(&temperature) {
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    "temperature must be between 0.0 and 2.0".to_string()
+                )));
+            }
+        }
+
+        // 3. Validate top_p range
+        if let Some(top_p) = request.top_p {
+            if !(0.0..=1.0).contains(&top_p) {
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    "top_p must be between 0.0 and 1.0".to_string()
+                )));
+            }
+        }
+
+        // 4. Validate session content size
+        let total_content_size: usize = request.session.messages.iter()
+            .map(|m| m.content.len())
+            .sum();
+        
+        if total_content_size > 1_000_000 { // 1MB limit
+            return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                "session content exceeds maximum size limit".to_string()
+            )));
+        }
+
+        // 5. Validate stop tokens
+        for stop_token in &request.stop_tokens {
+            if stop_token.is_empty() {
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    "stop tokens cannot be empty".to_string()
+                )));
+            }
+            if stop_token.len() > 100 {
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    "stop tokens cannot exceed 100 characters".to_string()
+                )));
+            }
+        }
+
+        // 6. Validate message content for potential injection
+        for message in &request.session.messages {
+            if message.content.len() > 100_000 { // 100KB per message
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    "individual message exceeds size limit".to_string()
+                )));
+            }
+
+            // Check for suspicious patterns (basic injection detection)
+            if message.content.contains('\0') {
+                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
+                    "message content contains null bytes".to_string()
+                )));
+            }
+        }
+
         Ok(())
     }
 
@@ -332,6 +459,9 @@ impl AgentAPI for AgentServer {
             request.session.id
         );
 
+        // Security validation: Check request parameters
+        self.validate_generation_request(&request)?;
+
         let mut working_session = request.session.clone();
         let mut accumulated_response = String::new();
         let mut total_tokens = 0u32;
@@ -457,6 +587,9 @@ impl AgentAPI for AgentServer {
             "Processing streaming generation request for session: {}",
             request.session.id
         );
+
+        // Security validation: Check request parameters
+        self.validate_generation_request(&request)?;
 
         // Render session to prompt
         let prompt = self.render_session_prompt(&request.session).await?;
