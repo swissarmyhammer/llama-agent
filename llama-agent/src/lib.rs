@@ -9,5 +9,8 @@ pub mod types;
 // Re-export commonly used types
 pub use types::*;
 
+// Re-export main agent functionality
+pub use agent::AgentServer;
+
 // Re-export MCP functionality
-pub use mcp::{HealthStatus, MCPClient, MCPServer, RetryConfig};
+pub use mcp::{HealthStatus as MCPHealthStatus, MCPClient, MCPServer, RetryConfig};
