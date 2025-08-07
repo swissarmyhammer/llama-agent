@@ -124,6 +124,7 @@ pub struct MCPServerConfig {
     pub name: String,
     pub command: String,
     pub args: Vec<String>,
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -655,6 +656,7 @@ mod tests {
                 "-y".to_string(),
                 "@modelcontextprotocol/server-filesystem".to_string(),
             ],
+            timeout_secs: None,
         };
 
         assert_eq!(config.name, "filesystem");
@@ -1069,6 +1071,7 @@ mod tests {
             name: "filesystem".to_string(),
             command: "npx".to_string(),
             args: vec!["-y".to_string()],
+            timeout_secs: None,
         };
         assert!(config.validate().is_ok());
 
@@ -1077,6 +1080,7 @@ mod tests {
             name: "".to_string(),
             command: "npx".to_string(),
             args: vec![],
+            timeout_secs: None,
         };
         assert!(config.validate().is_err());
 
@@ -1085,6 +1089,7 @@ mod tests {
             name: "filesystem".to_string(),
             command: "".to_string(),
             args: vec![],
+            timeout_secs: None,
         };
         assert!(config.validate().is_err());
 
@@ -1093,6 +1098,7 @@ mod tests {
             name: "file@system".to_string(),
             command: "npx".to_string(),
             args: vec![],
+            timeout_secs: None,
         };
         assert!(config.validate().is_err());
     }
@@ -1110,11 +1116,13 @@ mod tests {
                     name: "filesystem".to_string(),
                     command: "npx".to_string(),
                     args: vec![],
+                    timeout_secs: None,
                 },
                 MCPServerConfig {
                     name: "filesystem".to_string(),
                     command: "another".to_string(),
                     args: vec![],
+                    timeout_secs: None,
                 },
             ],
             ..Default::default()

@@ -10,7 +10,7 @@ resolver = "2"
 llama-cpp-2 = "0.1.109"
 
 # MCP integration  
-rmcp = "0.4.0"
+rmcp = { version = "0.4.0", features = ["transport-io"] }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
