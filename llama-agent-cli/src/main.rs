@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use futures::StreamExt;
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, Message, MessageRole, ModelConfig,
@@ -7,7 +8,7 @@ use llama_agent::{
     },
     AgentServer,
 };
-use std::{path::PathBuf, time::Duration};
+use std::{io::Write, path::PathBuf, time::Duration};
 use tokio::signal;
 use tracing::{error, info, warn};
 
@@ -367,62 +368,71 @@ async fn run_agent(args: Args) -> Result<String> {
         stop_tokens: vec![],
     };
 
-    println!("\nGenerating response...");
+    println!("\nGenerating response (streaming)...");
+    println!("{}", "=".repeat(SEPARATOR_WIDTH));
     let start_time = std::time::Instant::now();
 
-    match agent.generate(request).await {
-        Ok(response) => {
+    // Use streaming generation for real-time token output
+    match agent.generate_stream(request).await {
+        Ok(mut stream) => {
+            let mut token_count = 0;
+            let mut full_response = String::new();
+            let mut finish_reason = FinishReason::EndOfSequence; // Default finish reason
+
+            // Process each chunk as it arrives
+            while let Some(chunk_result) = stream.next().await {
+                match chunk_result {
+                    Ok(chunk) => {
+                        // Print the new text immediately (real-time streaming)
+                        print!("{}", chunk.text);
+                        std::io::stdout().flush().unwrap_or_else(|e| {
+                            warn!("Failed to flush stdout: {}", e);
+                        });
+
+                        // Accumulate for final statistics
+                        full_response.push_str(&chunk.text);
+                        token_count += chunk.token_count;
+
+                        // Check if generation is complete
+                        if chunk.is_complete {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Streaming error: {}", e);
+                        finish_reason = FinishReason::Error(e.to_string());
+                        break;
+                    }
+                }
+            }
+
             let generation_time = start_time.elapsed();
 
             // Display generation statistics
             println!("\n{}", "=".repeat(SEPARATOR_WIDTH));
-            println!(
-                "Response ({} tokens, {:.2}s):",
-                response.tokens_generated,
-                generation_time.as_secs_f32()
-            );
-            println!("{}", "=".repeat(SEPARATOR_WIDTH));
-
-            // Handle different finish reasons
-            match response.finish_reason {
-                FinishReason::ToolCall => {
-                    println!("\n⚠️  Model wants to call tools, but basic CLI doesn't support tool execution yet.");
-                    println!("Generated text with tool calls:");
-                    println!("{}", response.generated_text);
-                }
-                FinishReason::MaxTokens => {
-                    println!("{}", response.generated_text);
-                    println!(
-                        "\n⚠️  Response truncated due to token limit ({})",
-                        args.limit
-                    );
-                }
-                FinishReason::StopToken => {
-                    println!("{}", response.generated_text);
-                }
-                FinishReason::EndOfSequence => {
-                    println!("{}", response.generated_text);
-                }
-                FinishReason::Error(ref err) => {
-                    println!("{}", response.generated_text);
-                    println!("\n❌ Generation completed with error: {}", err);
-                }
-            }
-
-            println!("{}", "=".repeat(SEPARATOR_WIDTH));
             println!("Generation Statistics:");
-            println!("  Tokens generated: {}", response.tokens_generated);
+            println!("  Tokens generated: {}", token_count);
             println!("  Time taken: {:.2}s", generation_time.as_secs_f32());
-            if response.tokens_generated > 0 {
+            if token_count > 0 {
                 println!(
                     "  Tokens per second: {:.1}",
-                    response.tokens_generated as f32 / generation_time.as_secs_f32()
+                    token_count as f32 / generation_time.as_secs_f32()
                 );
             }
-            println!("  Finish reason: {:?}", response.finish_reason);
+            println!("  Finish reason: {:?}", finish_reason);
             println!("{}", "=".repeat(SEPARATOR_WIDTH));
 
-            Ok(response.generated_text)
+            // Handle warnings based on finish reason or token count
+            if token_count >= args.limit {
+                println!("\n⚠️  Response may have been truncated due to token limit ({})", args.limit);
+            }
+
+            // Check if the response looks like it contains tool calls
+            if full_response.contains("```") && (full_response.contains("function_call") || full_response.contains("tool_call")) {
+                println!("\n⚠️  Model wants to call tools, but basic CLI doesn't support tool execution yet.");
+            }
+
+            Ok(full_response)
         }
         Err(e) => {
             error!("Generation failed: {}", e);
