@@ -1,5 +1,5 @@
 use llama_agent::{
-    AgentConfig, MCPServerConfig, Message, MessageRole, ModelConfig, ModelSource, QueueConfig,
+    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, QueueConfig,
     Session, SessionConfig, SessionId, ToolCall, ToolCallId, ToolDefinition, ToolResult,
 };
 use std::path::PathBuf;
@@ -7,7 +7,6 @@ use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 /// Test utilities and common setup functions
-
 pub struct TestHelper;
 
 impl TestHelper {
@@ -114,15 +113,6 @@ impl TestHelper {
         }
     }
 
-    /// Create a test MCP server configuration
-    pub fn sample_mcp_config() -> MCPServerConfig {
-        MCPServerConfig {
-            name: "test_server".to_string(),
-            command: "echo".to_string(),
-            args: vec!["test".to_string()],
-            timeout_secs: Some(30),
-        }
-    }
 
     /// Create a temporary directory for test files
     pub fn temp_dir() -> TempDir {
@@ -136,15 +126,6 @@ impl TestHelper {
         model_path
     }
 
-    /// Wait for a short duration in tests
-    pub async fn short_delay() {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    /// Wait for a medium duration in tests
-    pub async fn medium_delay() {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
 
     /// Create a test configuration with local model
     pub fn config_with_local_model(temp_dir: &TempDir, filename: &str) -> AgentConfig {
@@ -172,105 +153,7 @@ impl TestHelper {
         }
     }
 
-    /// Assert that two sessions are equivalent (ignoring timestamps)
-    pub fn assert_sessions_equivalent(a: &Session, b: &Session) {
-        assert_eq!(a.id, b.id);
-        assert_eq!(a.messages.len(), b.messages.len());
-        
-        for (msg_a, msg_b) in a.messages.iter().zip(b.messages.iter()) {
-            assert_eq!(msg_a.role.as_str(), msg_b.role.as_str());
-            assert_eq!(msg_a.content, msg_b.content);
-            assert_eq!(msg_a.tool_call_id, msg_b.tool_call_id);
-            assert_eq!(msg_a.tool_name, msg_b.tool_name);
-        }
-        
-        assert_eq!(a.mcp_servers.len(), b.mcp_servers.len());
-        assert_eq!(a.available_tools.len(), b.available_tools.len());
-    }
 }
 
-/// Mock implementations for testing
 
-#[derive(Clone)]
-pub struct MockModel {
-    pub should_fail: bool,
-    pub response_text: String,
-    pub response_delay: Duration,
-}
 
-impl MockModel {
-    pub fn new() -> Self {
-        Self {
-            should_fail: false,
-            response_text: "Mock model response".to_string(),
-            response_delay: Duration::from_millis(10),
-        }
-    }
-
-    pub fn with_failure(mut self) -> Self {
-        self.should_fail = true;
-        self
-    }
-
-    pub fn with_response(mut self, response: impl Into<String>) -> Self {
-        self.response_text = response.into();
-        self
-    }
-
-    pub fn with_delay(mut self, delay: Duration) -> Self {
-        self.response_delay = delay;
-        self
-    }
-}
-
-impl Default for MockModel {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Test constants
-pub mod constants {
-    use std::time::Duration;
-
-    pub const TEST_TIMEOUT: Duration = Duration::from_secs(5);
-    pub const SHORT_TIMEOUT: Duration = Duration::from_millis(100);
-    pub const MEDIUM_TIMEOUT: Duration = Duration::from_secs(1);
-
-    pub const SAMPLE_HUGGINGFACE_REPO: &str = "microsoft/DialoGPT-medium";
-    pub const SAMPLE_MODEL_FILE: &str = "model.gguf";
-    pub const SAMPLE_BF16_MODEL_FILE: &str = "model-bf16.gguf";
-
-    pub const TEST_USER_MESSAGE: &str = "Hello, this is a test message";
-    pub const TEST_SYSTEM_MESSAGE: &str = "You are a helpful assistant";
-    pub const TEST_ASSISTANT_RESPONSE: &str = "Hello! I'm here to help you.";
-}
-
-/// Test assertions
-pub mod assertions {
-    use llama_agent::{FinishReason, GenerationResponse};
-    use std::time::Duration;
-
-    /// Assert that a generation response is valid
-    pub fn assert_valid_generation_response(response: &GenerationResponse) {
-        assert!(!response.generated_text.is_empty(), "Generated text should not be empty");
-        assert!(response.tokens_generated > 0, "Should generate at least one token");
-        assert!(response.generation_time > Duration::ZERO, "Generation time should be positive");
-        
-        match &response.finish_reason {
-            FinishReason::Error(msg) => panic!("Generation failed with error: {}", msg),
-            _ => {} // Other finish reasons are acceptable
-        }
-    }
-
-    /// Assert that an error message contains expected text
-    pub fn assert_error_contains(error: &dyn std::error::Error, expected: &str) {
-        let error_string = format!("{}", error);
-        assert!(
-            error_string.contains(expected),
-            "Error '{}' does not contain expected text '{}'",
-            error_string,
-            expected
-        );
-    }
-}

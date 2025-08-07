@@ -7,7 +7,7 @@ use tempfile::TempDir;
 #[tokio::test]
 async fn test_cli_help() {
     let output = Command::new("cargo")
-        .args(&["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--", "--help"])
+        .args(["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--", "--help"])
         .output()
         .expect("Failed to execute CLI");
 
@@ -25,7 +25,7 @@ async fn test_cli_help() {
 #[tokio::test]
 async fn test_cli_version() {
     let output = Command::new("cargo")
-        .args(&["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--", "--version"])
+        .args(["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--", "--version"])
         .output()
         .expect("Failed to execute CLI");
 
@@ -40,7 +40,7 @@ async fn test_cli_version() {
 async fn test_cli_missing_required_args() {
     // Test missing model argument
     let output = Command::new("cargo")
-        .args(&["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--", "--prompt", "hello"])
+        .args(["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--", "--prompt", "hello"])
         .output()
         .expect("Failed to execute CLI");
 
@@ -50,7 +50,7 @@ async fn test_cli_missing_required_args() {
 
     // Test missing prompt argument
     let output = Command::new("cargo")
-        .args(&["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--", "--model", "test"])
+        .args(["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--", "--model", "test"])
         .output()
         .expect("Failed to execute CLI");
 
@@ -62,7 +62,7 @@ async fn test_cli_missing_required_args() {
 #[tokio::test]
 async fn test_cli_with_nonexistent_model() {
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--bin",
             "llama-agent-cli",
@@ -92,7 +92,7 @@ async fn test_cli_with_dummy_model() {
     let _model_path = TestHelper::create_test_model_file(&temp_dir, "test.gguf");
     
     let output = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--bin",
             "llama-agent-cli",
@@ -301,7 +301,7 @@ async fn test_cli_prompt_variations() {
         println!("Testing prompt: {:?}", prompt);
         
         let output = Command::new("cargo")
-            .args(&[
+            .args([
                 "run",
                 "--bin",
                 "llama-agent-cli",
@@ -348,7 +348,7 @@ async fn test_cli_model_path_variations() {
         println!("Testing model path: {:?}", model_path);
         
         let output = Command::new("cargo")
-            .args(&[
+            .args([
                 "run",
                 "--bin",
                 "llama-agent-cli",

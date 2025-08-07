@@ -253,8 +253,10 @@ proptest! {
 
     #[test]
     fn test_valid_batch_size(batch_size in 1u32..8192) {
-        let mut config = ModelConfig::default();
-        config.batch_size = batch_size;
+        let config = ModelConfig {
+            batch_size,
+            ..Default::default()
+        };
         
         let validation_result = config.validate();
         
@@ -327,8 +329,10 @@ proptest! {
 
     #[test]
     fn test_extreme_batch_sizes(batch_size in 1u32..100000) {
-        let mut config = ModelConfig::default();
-        config.batch_size = batch_size;
+        let config = ModelConfig {
+            batch_size,
+            ..Default::default()
+        };
         
         let validation_result = config.validate();
         
