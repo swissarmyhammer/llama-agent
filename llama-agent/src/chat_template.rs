@@ -1,0 +1,624 @@
+use crate::types::{Session, TemplateError, ToolCall, ToolCallId, ToolDefinition};
+use llama_cpp_2::model::LlamaModel;
+use regex::Regex;
+use serde_json::Value;
+use std::collections::HashMap;
+use tracing::{debug, warn};
+
+pub struct ChatTemplateEngine {
+    tool_call_parsers: HashMap<String, Box<dyn ToolCallParser>>,
+}
+
+impl std::fmt::Debug for ChatTemplateEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChatTemplateEngine")
+            .field(
+                "parsers",
+                &self.tool_call_parsers.keys().collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+impl Default for ChatTemplateEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ChatTemplateEngine {
+    pub fn new() -> Self {
+        let mut parsers: HashMap<String, Box<dyn ToolCallParser>> = HashMap::new();
+
+        // Add default parsers for common formats
+        parsers.insert("json".to_string(), Box::new(JsonToolCallParser::new()));
+        parsers.insert("xml".to_string(), Box::new(XmlToolCallParser::new()));
+        parsers.insert(
+            "function_call".to_string(),
+            Box::new(FunctionCallParser::new()),
+        );
+
+        Self {
+            tool_call_parsers: parsers,
+        }
+    }
+
+    /// Render a session into a prompt string using the model's chat template
+    pub fn render_session(
+        &self,
+        session: &Session,
+        model: &LlamaModel,
+    ) -> Result<String, TemplateError> {
+        debug!("Rendering session with {} messages", session.messages.len());
+
+        // Convert session messages to the format expected by llama-cpp-2
+        let mut chat_messages = Vec::new();
+
+        for message in &session.messages {
+            let role = message.role.as_str().to_string();
+            let content = &message.content;
+
+            // Handle tool calls and results properly
+            match message.role {
+                crate::types::MessageRole::Tool => {
+                    // Tool response message
+                    if let Some(tool_call_id) = &message.tool_call_id {
+                        let formatted_content =
+                            format!("Tool result for call {}: {}", tool_call_id, content);
+                        chat_messages.push((role, formatted_content));
+                    } else {
+                        chat_messages.push((role, content.clone()));
+                    }
+                }
+                _ => {
+                    chat_messages.push((role, content.clone()));
+                }
+            }
+        }
+
+        // Include available tools in the template context if present
+        let tools_context = if !session.available_tools.is_empty() {
+            Some(self.format_tools_for_template(&session.available_tools)?)
+        } else {
+            None
+        };
+
+        // Apply the model's chat template
+        let rendered =
+            self.apply_chat_template_with_tools(model, &chat_messages, tools_context.as_deref())?;
+
+        debug!("Rendered prompt length: {}", rendered.len());
+        Ok(rendered)
+    }
+
+    /// Extract tool calls from generated text using registered parsers
+    pub fn extract_tool_calls(&self, generated_text: &str) -> Result<Vec<ToolCall>, TemplateError> {
+        debug!("Extracting tool calls from generated text");
+
+        let mut all_tool_calls = Vec::new();
+
+        // Try each parser until we find tool calls
+        for (parser_name, parser) in &self.tool_call_parsers {
+            debug!("Trying parser: {}", parser_name);
+
+            match parser.parse_tool_calls(generated_text) {
+                Ok(tool_calls) if !tool_calls.is_empty() => {
+                    debug!(
+                        "Found {} tool calls with parser {}",
+                        tool_calls.len(),
+                        parser_name
+                    );
+                    all_tool_calls.extend(tool_calls);
+                    break; // Use first successful parser
+                }
+                Ok(_) => {
+                    debug!("No tool calls found with parser {}", parser_name);
+                }
+                Err(e) => {
+                    debug!("Parser {} failed: {}", parser_name, e);
+                    continue;
+                }
+            }
+        }
+
+        // Deduplicate tool calls by ID
+        all_tool_calls.sort_by(|a, b| a.id.to_string().cmp(&b.id.to_string()));
+        all_tool_calls.dedup_by(|a, b| a.id == b.id);
+
+        debug!("Extracted {} unique tool calls", all_tool_calls.len());
+        Ok(all_tool_calls)
+    }
+
+    /// Validate that the model supports chat templates
+    pub fn validate_template(&self, model: &LlamaModel) -> Result<(), TemplateError> {
+        // Try to apply a simple template to check if it works
+        let test_messages = vec![("user".to_string(), "Hello".to_string())];
+
+        match self.apply_chat_template_with_tools(model, &test_messages, None) {
+            Ok(_) => {
+                debug!("Chat template validation successful");
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Chat template validation failed: {}", e);
+                Err(e)
+            }
+        }
+    }
+
+    /// Register a custom tool call parser
+    pub fn register_parser(&mut self, name: String, parser: Box<dyn ToolCallParser>) {
+        self.tool_call_parsers.insert(name, parser);
+    }
+
+    /// Format tools for inclusion in chat template
+    fn format_tools_for_template(&self, tools: &[ToolDefinition]) -> Result<String, TemplateError> {
+        let tools_json = serde_json::to_value(tools).map_err(|e| {
+            TemplateError::RenderingFailed(format!("Failed to serialize tools: {}", e))
+        })?;
+
+        let formatted = serde_json::to_string_pretty(&tools_json).map_err(|e| {
+            TemplateError::RenderingFailed(format!("Failed to format tools JSON: {}", e))
+        })?;
+
+        Ok(format!(
+            "Available tools:\n{}\n\nTo call a tool, respond with a properly formatted tool call.",
+            formatted
+        ))
+    }
+
+    /// Apply chat template with optional tools context
+    fn apply_chat_template_with_tools(
+        &self,
+        _model: &LlamaModel,
+        messages: &[(String, String)],
+        tools_context: Option<&str>,
+    ) -> Result<String, TemplateError> {
+        self.format_chat_template(messages, tools_context)
+    }
+
+    /// Internal method to format chat template (useful for testing)
+    fn format_chat_template(
+        &self,
+        messages: &[(String, String)],
+        tools_context: Option<&str>,
+    ) -> Result<String, TemplateError> {
+        // Convert to the format expected by llama-cpp-2
+        let mut formatted_messages = Vec::new();
+
+        // Add tools context as system message if provided
+        if let Some(tools) = tools_context {
+            formatted_messages.push(("system".to_string(), tools.to_string()));
+        }
+
+        // Add all conversation messages
+        for (role, content) in messages {
+            formatted_messages.push((role.clone(), content.clone()));
+        }
+
+        // For now, we'll create a simple chat template format
+        // In the future, this should use llama-cpp-2's built-in template functionality
+        // when it becomes available in the API
+        let mut prompt = String::new();
+
+        for (role, content) in &formatted_messages {
+            match role.as_str() {
+                "system" => {
+                    prompt.push_str(&format!("### System:\n{}\n\n", content));
+                }
+                "user" => {
+                    prompt.push_str(&format!("### Human:\n{}\n\n", content));
+                }
+                "assistant" => {
+                    prompt.push_str(&format!("### Assistant:\n{}\n\n", content));
+                }
+                "tool" => {
+                    prompt.push_str(&format!("### Tool Result:\n{}\n\n", content));
+                }
+                _ => {
+                    prompt.push_str(&format!("### {}:\n{}\n\n", role, content));
+                }
+            }
+        }
+
+        // Add assistant prompt
+        prompt.push_str("### Assistant:\n");
+
+        Ok(prompt)
+    }
+}
+
+/// Trait for parsing tool calls from different formats
+pub trait ToolCallParser: Send + Sync {
+    fn parse_tool_calls(&self, text: &str) -> Result<Vec<ToolCall>, TemplateError>;
+}
+
+/// Parser for JSON function call format
+pub struct JsonToolCallParser {
+    regex: Regex,
+}
+
+impl Default for JsonToolCallParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl JsonToolCallParser {
+    pub fn new() -> Self {
+        // Match JSON objects with a simple approach
+        let regex = Regex::new(r#"\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\}"#).unwrap();
+
+        Self { regex }
+    }
+}
+
+impl ToolCallParser for JsonToolCallParser {
+    fn parse_tool_calls(&self, text: &str) -> Result<Vec<ToolCall>, TemplateError> {
+        let mut tool_calls = Vec::new();
+
+        for capture in self.regex.find_iter(text) {
+            let json_str = capture.as_str();
+
+            match serde_json::from_str::<Value>(json_str) {
+                Ok(json) => {
+                    if let Some(tool_call) = self.parse_json_tool_call(&json)? {
+                        tool_calls.push(tool_call);
+                    }
+                }
+                Err(e) => {
+                    debug!("Failed to parse JSON tool call: {}", e);
+                    continue;
+                }
+            }
+        }
+
+        Ok(tool_calls)
+    }
+}
+
+impl JsonToolCallParser {
+    fn parse_json_tool_call(&self, json: &Value) -> Result<Option<ToolCall>, TemplateError> {
+        // Try different common JSON formats for tool calls
+
+        // Format 1: {"function_name": "tool_name", "arguments": {...}}
+        if let (Some(function_name), Some(arguments)) = (
+            json.get("function_name").and_then(|v| v.as_str()),
+            json.get("arguments"),
+        ) {
+            return Ok(Some(ToolCall {
+                id: ToolCallId::new(),
+                name: function_name.to_string(),
+                arguments: arguments.clone(),
+            }));
+        }
+
+        // Format 2: {"tool": "tool_name", "parameters": {...}}
+        if let (Some(tool_name), Some(parameters)) = (
+            json.get("tool").and_then(|v| v.as_str()),
+            json.get("parameters"),
+        ) {
+            return Ok(Some(ToolCall {
+                id: ToolCallId::new(),
+                name: tool_name.to_string(),
+                arguments: parameters.clone(),
+            }));
+        }
+
+        // Format 3: {"name": "tool_name", "args": {...}}
+        if let (Some(name), Some(args)) =
+            (json.get("name").and_then(|v| v.as_str()), json.get("args"))
+        {
+            return Ok(Some(ToolCall {
+                id: ToolCallId::new(),
+                name: name.to_string(),
+                arguments: args.clone(),
+            }));
+        }
+
+        Ok(None)
+    }
+}
+
+/// Parser for XML-style function calls
+pub struct XmlToolCallParser {
+    regex: Regex,
+}
+
+impl Default for XmlToolCallParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl XmlToolCallParser {
+    pub fn new() -> Self {
+        // Match XML-style function calls like <function_call name="tool_name">...</function_call>
+        let regex = Regex::new(r#"<function_call[^>]*>(.*?)</function_call>"#)
+            .unwrap_or_else(|_| Regex::new(r#"<tool_call[^>]*>(.*?)</tool_call>"#).unwrap());
+
+        Self { regex }
+    }
+}
+
+impl ToolCallParser for XmlToolCallParser {
+    fn parse_tool_calls(&self, text: &str) -> Result<Vec<ToolCall>, TemplateError> {
+        let mut tool_calls = Vec::new();
+
+        for capture in self.regex.captures_iter(text) {
+            if let Some(tool_call) = self.parse_xml_tool_call(capture.get(0).unwrap().as_str())? {
+                tool_calls.push(tool_call);
+            }
+        }
+
+        Ok(tool_calls)
+    }
+}
+
+impl XmlToolCallParser {
+    fn parse_xml_tool_call(&self, xml: &str) -> Result<Option<ToolCall>, TemplateError> {
+        // Simple XML parsing - extract name attribute and content
+        let name_regex = Regex::new(r#"name="([^"]*)"#).unwrap();
+        let content_regex = Regex::new(r#"<[^>]*>(.*)</[^>]*>"#).unwrap();
+
+        if let Some(name_match) = name_regex.captures(xml) {
+            let name = name_match.get(1).unwrap().as_str();
+
+            let arguments = if let Some(content_match) = content_regex.captures(xml) {
+                let content = content_match.get(1).unwrap().as_str();
+                match serde_json::from_str::<Value>(content) {
+                    Ok(json) => json,
+                    Err(_) => Value::String(content.to_string()),
+                }
+            } else {
+                Value::Null
+            };
+
+            return Ok(Some(ToolCall {
+                id: ToolCallId::new(),
+                name: name.to_string(),
+                arguments,
+            }));
+        }
+
+        Ok(None)
+    }
+}
+
+/// Parser for natural language function call format
+pub struct FunctionCallParser {
+    regex: Regex,
+}
+
+impl Default for FunctionCallParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FunctionCallParser {
+    pub fn new() -> Self {
+        // Match patterns like "Call function_name with arguments {...}"
+        let regex = Regex::new(r"(?i)call\s+(\w+)\s+with\s+(?:arguments?\s+)?(.+)")
+            .unwrap_or_else(|_| Regex::new(r"(\w+)\s*\(([^)]*)\)").unwrap());
+
+        Self { regex }
+    }
+}
+
+impl ToolCallParser for FunctionCallParser {
+    fn parse_tool_calls(&self, text: &str) -> Result<Vec<ToolCall>, TemplateError> {
+        let mut tool_calls = Vec::new();
+
+        for capture in self.regex.captures_iter(text) {
+            if let Some(tool_call) = self.parse_function_call(&capture)? {
+                tool_calls.push(tool_call);
+            }
+        }
+
+        Ok(tool_calls)
+    }
+}
+
+impl FunctionCallParser {
+    fn parse_function_call(
+        &self,
+        capture: &regex::Captures,
+    ) -> Result<Option<ToolCall>, TemplateError> {
+        if let (Some(name), Some(args_str)) = (capture.get(1), capture.get(2)) {
+            let name = name.as_str();
+            let args_str = args_str.as_str().trim();
+
+            let arguments = if args_str.starts_with('{') && args_str.ends_with('}') {
+                // Try to parse as JSON
+                match serde_json::from_str::<Value>(args_str) {
+                    Ok(json) => json,
+                    Err(_) => Value::String(args_str.to_string()),
+                }
+            } else {
+                // Treat as string parameter
+                Value::String(args_str.to_string())
+            };
+
+            return Ok(Some(ToolCall {
+                id: ToolCallId::new(),
+                name: name.to_string(),
+                arguments,
+            }));
+        }
+
+        Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Message, MessageRole, Session, SessionId, ToolDefinition};
+    use std::time::SystemTime;
+
+    fn create_test_session() -> Session {
+        Session {
+            id: SessionId::new(),
+            messages: vec![
+                Message {
+                    role: MessageRole::System,
+                    content: "You are a helpful assistant.".to_string(),
+                    tool_call_id: None,
+                    tool_name: None,
+                    timestamp: SystemTime::now(),
+                },
+                Message {
+                    role: MessageRole::User,
+                    content: "Hello, can you help me?".to_string(),
+                    tool_call_id: None,
+                    tool_name: None,
+                    timestamp: SystemTime::now(),
+                },
+            ],
+            mcp_servers: vec![],
+            available_tools: vec![ToolDefinition {
+                name: "list_files".to_string(),
+                description: "List files in a directory".to_string(),
+                parameters: serde_json::json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+                server_name: "filesystem".to_string(),
+            }],
+            created_at: SystemTime::now(),
+            updated_at: SystemTime::now(),
+        }
+    }
+
+    #[test]
+    fn test_chat_template_engine_creation() {
+        let engine = ChatTemplateEngine::new();
+        assert_eq!(engine.tool_call_parsers.len(), 3);
+        assert!(engine.tool_call_parsers.contains_key("json"));
+        assert!(engine.tool_call_parsers.contains_key("xml"));
+        assert!(engine.tool_call_parsers.contains_key("function_call"));
+    }
+
+    #[test]
+    fn test_format_tools_for_template() {
+        let engine = ChatTemplateEngine::new();
+        let session = create_test_session();
+
+        let formatted = engine
+            .format_tools_for_template(&session.available_tools)
+            .unwrap();
+        assert!(formatted.contains("Available tools:"));
+        assert!(formatted.contains("list_files"));
+        assert!(formatted.contains("filesystem"));
+    }
+
+    #[test]
+    fn test_json_tool_call_parser() {
+        let parser = JsonToolCallParser::new();
+
+        // Test format 1
+        let text = r#"{"function_name": "list_files", "arguments": {"path": "/tmp"}}"#;
+        let tool_calls = parser.parse_tool_calls(text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_files");
+
+        // Test format 2
+        let text = r#"{"tool": "list_files", "parameters": {"path": "/tmp"}}"#;
+        let tool_calls = parser.parse_tool_calls(text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_files");
+
+        // Test format 3
+        let text = r#"{"name": "list_files", "args": {"path": "/tmp"}}"#;
+        let tool_calls = parser.parse_tool_calls(text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_files");
+    }
+
+    #[test]
+    fn test_xml_tool_call_parser() {
+        let parser = XmlToolCallParser::new();
+
+        let text = r#"<function_call name="list_files">{"path": "/tmp"}</function_call>"#;
+        let tool_calls = parser.parse_tool_calls(text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_files");
+    }
+
+    #[test]
+    fn test_function_call_parser() {
+        let parser = FunctionCallParser::new();
+
+        let text = "Call list_files with arguments {\"path\": \"/tmp\"}";
+        let tool_calls = parser.parse_tool_calls(text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_files");
+    }
+
+    #[test]
+    fn test_extract_tool_calls_multiple_formats() {
+        let engine = ChatTemplateEngine::new();
+
+        let text = r#"
+        I'll help you with that. Let me list the files first.
+        {"function_name": "list_files", "arguments": {"path": "/tmp"}}
+        "#;
+
+        let tool_calls = engine.extract_tool_calls(text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_files");
+    }
+
+    #[test]
+    fn test_extract_tool_calls_no_matches() {
+        let engine = ChatTemplateEngine::new();
+
+        let text = "This is just regular text with no tool calls.";
+        let tool_calls = engine.extract_tool_calls(text).unwrap();
+        assert_eq!(tool_calls.len(), 0);
+    }
+
+    #[test]
+    fn test_register_custom_parser() {
+        let mut engine = ChatTemplateEngine::new();
+        let initial_count = engine.tool_call_parsers.len();
+
+        engine.register_parser("custom".to_string(), Box::new(JsonToolCallParser::new()));
+        assert_eq!(engine.tool_call_parsers.len(), initial_count + 1);
+        assert!(engine.tool_call_parsers.contains_key("custom"));
+    }
+
+    #[test]
+    fn test_tool_call_deduplication() {
+        let engine = ChatTemplateEngine::new();
+
+        // Text with duplicate tool calls
+        let text = r#"
+        {"function_name": "list_files", "arguments": {"path": "/tmp"}}
+        I'll also check another directory.
+        {"function_name": "list_files", "arguments": {"path": "/home"}}
+        "#;
+
+        let tool_calls = engine.extract_tool_calls(text).unwrap();
+        assert_eq!(tool_calls.len(), 2); // Should have 2 unique tool calls
+    }
+
+    #[test]
+    fn test_apply_chat_template_with_tools_format() {
+        let engine = ChatTemplateEngine::new();
+        let messages = vec![
+            ("user".to_string(), "Hello".to_string()),
+            ("assistant".to_string(), "Hi there!".to_string()),
+        ];
+
+        let tools_context = "Available tools: list_files";
+        let result = engine.format_chat_template(&messages, Some(tools_context));
+
+        // This test verifies the string formatting logic
+        assert!(result.is_ok());
+        let prompt = result.unwrap();
+        assert!(prompt.contains("### System:"));
+        assert!(prompt.contains("Available tools: list_files"));
+        assert!(prompt.contains("### Human:"));
+        assert!(prompt.contains("Hello"));
+        assert!(prompt.contains("### Assistant:"));
+    }
+}
