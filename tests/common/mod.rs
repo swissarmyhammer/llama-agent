@@ -1,5 +1,5 @@
 use llama_agent::{
-    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, QueueConfig, Session,
+    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, Session,
     SessionConfig, SessionId, ToolCall, ToolCallId, ToolDefinition, ToolResult,
 };
 use std::path::PathBuf;
@@ -33,6 +33,7 @@ impl TestHelper {
                 max_sessions: 10,
                 session_timeout: Duration::from_secs(300), // 5 minutes for tests
             },
+            parallel_execution_config: ParallelExecutionConfig::default(),
         }
     }
 
@@ -150,6 +151,7 @@ impl TestHelper {
                 max_sessions: 5,
                 session_timeout: Duration::from_secs(60),
             },
+            parallel_execution_config: ParallelExecutionConfig::default(),
         }
     }
 }

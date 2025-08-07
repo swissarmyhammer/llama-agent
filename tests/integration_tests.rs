@@ -307,6 +307,7 @@ async fn test_error_handling_paths() {
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     assert!(invalid_config.validate().is_err());
@@ -324,6 +325,7 @@ async fn test_error_handling_paths() {
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     assert!(invalid_hf_config.validate().is_err());
@@ -347,6 +349,7 @@ async fn test_error_handling_paths() {
             },
         ],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     assert!(duplicate_mcp_config.validate().is_err());

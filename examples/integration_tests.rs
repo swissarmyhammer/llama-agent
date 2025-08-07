@@ -7,7 +7,7 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, GenerationRequest, MCPServerConfig, Message, MessageRole,
-        ModelConfig, ModelSource, QueueConfig, SessionConfig, SessionId,
+        ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig, SessionId,
     },
     AgentServer,
 };
@@ -187,6 +187,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     // Configuration should pass validation (even if model loading fails)
@@ -208,6 +209,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match invalid_batch_config.validate() {
@@ -228,6 +230,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match invalid_repo_config.validate() {
@@ -249,6 +252,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match valid_local_config.validate() {
@@ -275,6 +279,7 @@ async fn test_agent_initialization() -> Result<(), Box<dyn std::error::Error>> {
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match AgentServer::initialize(invalid_model_config).await {
@@ -301,6 +306,7 @@ async fn test_agent_initialization() -> Result<(), Box<dyn std::error::Error>> {
         },
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match AgentServer::initialize(invalid_queue_config).await {
@@ -566,6 +572,7 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
             max_sessions: HIGH_SESSION_LIMIT, // High session limit
             session_timeout: Duration::from_secs(1800),
         },
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match high_throughput_config.validate() {
@@ -593,6 +600,7 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
             max_sessions: MODERATE_SESSION_LIMIT,
             session_timeout: Duration::from_secs(600),
         },
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match low_latency_config.validate() {
@@ -620,6 +628,7 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
             max_sessions: SMALL_SESSION_LIMIT, // Low session count
             session_timeout: Duration::from_secs(300),
         },
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match memory_efficient_config.validate() {

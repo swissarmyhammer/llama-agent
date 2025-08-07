@@ -10,7 +10,7 @@ use llama_agent::{
     chat_template::ChatTemplateEngine,
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, QueueConfig, SessionConfig,
+        MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -48,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout_secs: None,
         }],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     let agent = AgentServer::initialize(config).await?;

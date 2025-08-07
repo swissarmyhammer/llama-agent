@@ -175,6 +175,89 @@ pub struct ToolResult {
     pub error: Option<String>,
 }
 
+/// Represents different types of resources that tools might access
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ResourceType {
+    FileSystem(String), // Path pattern
+    Network(String),    // URL pattern
+    Database(String),   // Database/table name
+    Memory,             // In-memory operations
+    System,             // System-level operations
+    Other(String),      // Custom resource type
+}
+
+/// Defines what kind of access a tool has to a resource
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AccessType {
+    Read,
+    Write,
+    ReadWrite,
+    Execute,
+    Create,
+    Delete,
+}
+
+/// Describes a tool's resource access pattern
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceAccess {
+    pub resource: ResourceType,
+    pub access_type: AccessType,
+    pub exclusive: bool, // Whether this resource requires exclusive access
+}
+
+/// Represents a potential conflict between two tool calls
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConflict {
+    pub tool1: String,
+    pub tool2: String,
+    pub conflict_type: ConflictType,
+    pub description: String,
+}
+
+/// Types of conflicts that can occur between tools
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConflictType {
+    ResourceConflict, // Both tools access same resource in conflicting ways
+    DataDependency,   // One tool depends on output from another
+    OrderDependency,  // Tools must execute in specific order
+    MutualExclusion,  // Tools cannot run simultaneously
+}
+
+/// Represents a reference in tool parameters to another tool's output
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParameterReference {
+    pub parameter_path: String,  // JSON path in parameters
+    pub referenced_tool: String, // Name of tool being referenced
+    pub reference_type: ReferenceType,
+}
+
+/// Types of parameter references
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReferenceType {
+    DirectOutput,     // References the entire output
+    PropertyAccess,   // References a specific property of the output
+    ConditionalValue, // Value depends on output condition
+    FileSystemPath,   // References a file/directory created by another tool
+}
+
+/// Configuration for tool-specific parallel execution rules
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ParallelExecutionConfig {
+    pub tool_conflicts: Vec<ToolConflict>,
+    pub resource_access_patterns: std::collections::HashMap<String, Vec<ResourceAccess>>,
+    pub safe_parallel_groups: Vec<Vec<String>>, // Groups of tools that are safe to run in parallel
+    pub never_parallel: Vec<(String, String)>,  // Pairs of tools that should never run in parallel
+    pub dependency_rules: Vec<DependencyRule>,
+}
+
+/// Rules for tool dependencies
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyRule {
+    pub pattern: String, // Regex pattern for parameter matching
+    pub dependency_type: ConflictType,
+    pub applies_to_tools: Vec<String>, // If empty, applies to all tools
+}
+
 #[derive(Debug)]
 pub struct StreamChunk {
     pub text: String,
@@ -188,6 +271,7 @@ pub struct AgentConfig {
     pub queue_config: QueueConfig,
     pub mcp_servers: Vec<MCPServerConfig>,
     pub session_config: SessionConfig,
+    pub parallel_execution_config: ParallelExecutionConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

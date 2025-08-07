@@ -3,7 +3,7 @@ use clap::Parser;
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, Message, MessageRole, ModelConfig,
-        ModelSource, QueueConfig, SessionConfig,
+        ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -280,6 +280,7 @@ async fn run_agent(args: Args) -> Result<String> {
             session_timeout: Duration::from_secs(args.session_timeout),
         },
         mcp_servers: vec![], // No MCP servers for basic CLI
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     info!("Initializing AgentServer (this may take a while for model loading)...");

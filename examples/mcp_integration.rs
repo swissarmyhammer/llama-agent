@@ -11,7 +11,7 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, QueueConfig, SessionConfig,
+        MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -73,6 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         ],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     println!("Initializing AgentServer with multiple MCP servers...");
@@ -112,6 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     timeout_secs: Some(30),
                 }],
                 session_config: SessionConfig::default(),
+                parallel_execution_config: ParallelExecutionConfig::default(),
             };
 
             AgentServer::initialize(fallback_config).await?

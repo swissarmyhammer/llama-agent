@@ -13,7 +13,7 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, QueueConfig, SessionConfig,
+        MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -91,6 +91,7 @@ async fn demonstrate_invalid_model_config() -> Result<(), Box<dyn std::error::Er
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match AgentServer::initialize(invalid_hf_config).await {
@@ -112,6 +113,7 @@ async fn demonstrate_invalid_model_config() -> Result<(), Box<dyn std::error::Er
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match AgentServer::initialize(invalid_local_config).await {
@@ -133,6 +135,7 @@ async fn demonstrate_invalid_model_config() -> Result<(), Box<dyn std::error::Er
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match AgentServer::initialize(invalid_batch_config).await {
@@ -178,6 +181,7 @@ async fn demonstrate_mcp_server_failures() -> Result<(), Box<dyn std::error::Err
             },
         ],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     println!("Attempting to initialize with invalid MCP servers...");
@@ -232,6 +236,7 @@ async fn demonstrate_generation_errors() -> Result<(), Box<dyn std::error::Error
         },
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     println!("Attempting to initialize agent for generation error tests...");

@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod chat_template;
+pub mod dependency_analysis;
 pub mod mcp;
 pub mod model;
 pub mod queue;

@@ -7,7 +7,7 @@ use futures::StreamExt;
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, GenerationRequest, Message, MessageRole, ModelConfig, ModelSource,
-        QueueConfig, SessionConfig,
+        ParallelExecutionConfig, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -39,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         mcp_servers: vec![], // No MCP servers for this example
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     println!("Initializing agent for streaming...");

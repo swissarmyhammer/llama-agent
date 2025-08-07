@@ -13,7 +13,7 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, GenerationRequest, Message, MessageRole, ModelConfig, ModelSource,
-        QueueConfig, SessionConfig,
+        ParallelExecutionConfig, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -104,6 +104,7 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
             max_sessions: 10000,                        // High session limit
             session_timeout: Duration::from_secs(1800), // 30 minutes
         },
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     print_config_summary("High Throughput", &high_throughput_config);
@@ -129,6 +130,7 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
             max_sessions: 1000,
             session_timeout: Duration::from_secs(600), // 10 minutes
         },
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     print_config_summary("Low Latency", &low_latency_config);
@@ -154,6 +156,7 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
             max_sessions: 100,                         // Low session count
             session_timeout: Duration::from_secs(300), // 5 minutes
         },
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     print_config_summary("Memory Efficient", &memory_efficient_config);
