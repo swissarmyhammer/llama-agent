@@ -87,6 +87,7 @@ async fn test_model_manager_workflow() {
     // Test model manager creation and loading attempts
     match llama_agent::model::ModelManager::new(config.model) {
         Ok(model_manager) => {
+            let model_manager = std::sync::Arc::new(model_manager);
             // Model loading should fail with dummy file, but that's expected
             let is_loaded = model_manager.is_loaded().await;
             assert!(!is_loaded);
