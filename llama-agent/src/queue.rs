@@ -1,19 +1,23 @@
 use crate::model::ModelManager;
 use crate::types::{
-    FinishReason, GenerationRequest, GenerationResponse, MessageRole, QueueConfig, QueueError, 
+    FinishReason, GenerationRequest, GenerationResponse, MessageRole, QueueConfig, QueueError,
     Session, StreamChunk,
 };
-use llama_cpp_2::{context::LlamaContext, model::LlamaModel};
+use llama_cpp_2::{
+    llama_batch::LlamaBatch,
+    model::{AddBos, LlamaModel, Special},
+    sampling::LlamaSampler,
+};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, Mutex};
-use tokio_util::sync::CancellationToken;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use ulid::Ulid;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct QueueMetrics {
     pub total_requests: AtomicU64,
     pub completed_requests: AtomicU64,
@@ -38,34 +42,36 @@ impl QueueMetrics {
             total_tokens_generated: AtomicU64::new(0),
         }
     }
-    
+
     pub fn record_request_submitted(&self) {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
         self.current_queue_size.fetch_add(1, Ordering::Relaxed);
     }
-    
+
     pub fn record_request_completed(&self, processing_time: Duration, tokens_generated: u32) {
         self.completed_requests.fetch_add(1, Ordering::Relaxed);
         self.current_queue_size.fetch_sub(1, Ordering::Relaxed);
-        self.total_processing_time_ms.fetch_add(processing_time.as_millis() as u64, Ordering::Relaxed);
-        self.total_tokens_generated.fetch_add(tokens_generated as u64, Ordering::Relaxed);
+        self.total_processing_time_ms
+            .fetch_add(processing_time.as_millis() as u64, Ordering::Relaxed);
+        self.total_tokens_generated
+            .fetch_add(tokens_generated as u64, Ordering::Relaxed);
     }
-    
+
     pub fn record_request_failed(&self) {
         self.failed_requests.fetch_add(1, Ordering::Relaxed);
         self.current_queue_size.fetch_sub(1, Ordering::Relaxed);
     }
-    
+
     pub fn record_request_timeout(&self) {
         self.timeout_requests.fetch_add(1, Ordering::Relaxed);
         self.current_queue_size.fetch_sub(1, Ordering::Relaxed);
     }
-    
+
     pub fn record_request_cancelled(&self) {
         self.cancelled_requests.fetch_add(1, Ordering::Relaxed);
         self.current_queue_size.fetch_sub(1, Ordering::Relaxed);
     }
-    
+
     pub fn get_stats(&self) -> QueueStats {
         QueueStats {
             total_requests: self.total_requests.load(Ordering::Relaxed),
@@ -77,7 +83,11 @@ impl QueueMetrics {
             average_processing_time_ms: {
                 let total_time = self.total_processing_time_ms.load(Ordering::Relaxed);
                 let completed = self.completed_requests.load(Ordering::Relaxed);
-                if completed > 0 { total_time / completed } else { 0 }
+                if completed > 0 {
+                    total_time / completed
+                } else {
+                    0
+                }
             },
             total_tokens_generated: self.total_tokens_generated.load(Ordering::Relaxed),
         }
@@ -282,13 +292,21 @@ impl RequestQueue {
                 );
                 let _ = queued_request
                     .response_sender
-                    .send(Err(QueueError::WorkerError("Request cancelled".to_string())));
+                    .send(Err(QueueError::WorkerError(
+                        "Request cancelled".to_string(),
+                    )));
                 metrics.record_request_cancelled();
                 continue;
             }
 
             // Process the request
-            Self::process_request(worker_id, queued_request, model_manager.clone(), metrics.clone()).await;
+            Self::process_request(
+                worker_id,
+                queued_request,
+                model_manager.clone(),
+                metrics.clone(),
+            )
+            .await;
         }
     }
 
@@ -319,25 +337,16 @@ impl RequestQueue {
             // Handle streaming request
             let result = model_manager
                 .with_model(|model| {
-                    let context_result = model_manager.create_context(model);
-                    match context_result {
-                        Ok(context) => {
-                            // Process the streaming request synchronously within the model lifetime
-                            Self::process_streaming_request_sync(
-                                worker_id,
-                                request_id.clone(),
-                                &queued_request.request,
-                                model,
-                                &context,
-                                stream_sender.clone(),
-                                &queued_request.cancellation_token,
-                            )
-                        }
-                        Err(e) => Err(QueueError::WorkerError(format!(
-                            "Failed to create context: {}",
-                            e
-                        ))),
-                    }
+                    // Process the streaming request synchronously within the model lifetime
+                    Self::process_streaming_request_sync(
+                        worker_id,
+                        request_id.clone(),
+                        &queued_request.request,
+                        model,
+                        &model_manager,
+                        stream_sender.clone(),
+                        &queued_request.cancellation_token,
+                    )
                 })
                 .await;
 
@@ -359,24 +368,15 @@ impl RequestQueue {
             // Handle batch request
             let result = model_manager
                 .with_model(|model| {
-                    let context_result = model_manager.create_context(model);
-                    match context_result {
-                        Ok(context) => {
-                            // Process the request synchronously within the model lifetime
-                            Self::process_batch_request_sync(
-                                worker_id,
-                                request_id.clone(),
-                                &queued_request.request,
-                                model,
-                                &context,
-                                &queued_request.cancellation_token,
-                            )
-                        }
-                        Err(e) => Err(QueueError::WorkerError(format!(
-                            "Failed to create context: {}",
-                            e
-                        ))),
-                    }
+                    // Process the request synchronously within the model lifetime
+                    Self::process_batch_request_sync(
+                        worker_id,
+                        request_id.clone(),
+                        &queued_request.request,
+                        model,
+                        &model_manager,
+                        &queued_request.cancellation_token,
+                    )
                 })
                 .await;
 
@@ -386,20 +386,24 @@ impl RequestQueue {
                     match inner_result {
                         Ok(response) => {
                             let processing_time = start_time.elapsed();
-                            metrics.record_request_completed(processing_time, response.tokens_generated);
+                            metrics.record_request_completed(
+                                processing_time,
+                                response.tokens_generated,
+                            );
                             let _ = queued_request.response_sender.send(Ok(response));
-                        },
+                        }
                         Err(queue_error) => {
                             metrics.record_request_failed();
                             let _ = queued_request.response_sender.send(Err(queue_error));
-                        },
+                        }
                     }
-                },
+                }
                 Err(model_error) => {
                     metrics.record_request_failed();
-                    let queue_error = QueueError::WorkerError(format!("Model error: {}", model_error));
+                    let queue_error =
+                        QueueError::WorkerError(format!("Model error: {}", model_error));
                     let _ = queued_request.response_sender.send(Err(queue_error));
-                },
+                }
             };
         }
 
@@ -414,8 +418,8 @@ impl RequestQueue {
         worker_id: usize,
         request_id: String,
         request: &GenerationRequest,
-        _model: &LlamaModel,
-        _context: &LlamaContext<'_>,
+        model: &LlamaModel,
+        model_manager: &ModelManager,
         cancellation_token: &CancellationToken,
     ) -> Result<GenerationResponse, QueueError> {
         let start_time = Instant::now();
@@ -429,16 +433,74 @@ impl RequestQueue {
         let prompt = Self::format_session_prompt(&request.session)?;
         debug!("Formatted prompt: {}", prompt);
 
-        // TODO: Replace with actual llama-cpp-2 inference once API is confirmed
-        // For now, simulate processing with proper cancellation support
+        // Create context for this inference
+        let mut ctx = match model_manager.create_context(model) {
+            Ok(context) => context,
+            Err(e) => {
+                error!("Failed to create context: {}", e);
+                return Err(QueueError::WorkerError(format!(
+                    "Context creation failed: {}",
+                    e
+                )));
+            }
+        };
+
+        // Tokenize the prompt
+        let tokens_list = match model.str_to_token(&prompt, AddBos::Always) {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                error!("Failed to tokenize prompt: {}", e);
+                return Err(QueueError::WorkerError(format!(
+                    "Tokenization failed: {}",
+                    e
+                )));
+            }
+        };
+
+        debug!("Tokenized prompt to {} tokens", tokens_list.len());
+
+        // Create batch for initial prompt processing
+        let batch_size = 512;
+        let mut batch = LlamaBatch::new(batch_size, 1);
+
+        // Add prompt tokens to batch
+        for (i, token) in tokens_list.iter().enumerate() {
+            let is_last = i == tokens_list.len() - 1;
+            if let Err(e) = batch.add(*token, i as i32, &[0], is_last) {
+                error!("Failed to add token to batch: {}", e);
+                return Err(QueueError::WorkerError(format!(
+                    "Batch token add failed: {}",
+                    e
+                )));
+            }
+        }
+
+        // Process the initial prompt batch
+        if let Err(e) = ctx.decode(&mut batch) {
+            error!("Failed to decode batch: {}", e);
+            return Err(QueueError::WorkerError(format!(
+                "Batch decode failed: {}",
+                e
+            )));
+        }
+
+        debug!("Initial prompt processed, starting generation");
+
+        // Create sampler for token generation
+        let mut sampler = LlamaSampler::chain_simple([
+            LlamaSampler::dist(1234), // Use fixed seed for deterministic behavior
+            LlamaSampler::greedy(),
+        ]);
+
         let max_tokens = request.max_tokens.unwrap_or(512);
         let mut generated_text = String::new();
         let mut finish_reason = FinishReason::MaxTokens;
         let mut tokens_generated = 0u32;
+        let mut n_cur = tokens_list.len();
 
-        // Simulate token generation with cancellation checks
-        for token_idx in 0..max_tokens {
-            // Check for cancellation before processing each token
+        // Generation loop
+        while tokens_generated < max_tokens {
+            // Check for cancellation before each token
             if cancellation_token.is_cancelled() {
                 debug!(
                     "Worker {} batch request {} cancelled during token generation",
@@ -448,32 +510,47 @@ impl RequestQueue {
                 break;
             }
 
-            // Simulate processing time
-            std::thread::sleep(Duration::from_millis(1));
+            // Sample next token
+            let token = sampler.sample(&ctx, batch.n_tokens() - 1);
 
-            // Generate mock text
-            if token_idx == 0 {
-                generated_text.push_str(&format!("Response for session '{}' with {} messages", 
-                    request.session.id, request.session.messages.len()));
-            } else if token_idx % 10 == 0 {
-                generated_text.push_str(" ");
-            } else {
-                generated_text.push_str("word");
+            // Check for end of sequence token
+            if model.is_eog_token(token) {
+                finish_reason = FinishReason::EndOfSequence;
+                break;
             }
-            
+
+            // Convert token to string
+            let token_str = match model.token_to_str(token, Special::Tokenize) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("Failed to convert token to string: {}", e);
+                    continue; // Skip this token but continue generation
+                }
+            };
+
+            generated_text.push_str(&token_str);
             tokens_generated += 1;
 
-            // Check for stop tokens
+            // Check for stop tokens in the generated text
             if Self::should_stop(&generated_text, &request.stop_tokens) {
                 finish_reason = FinishReason::StopToken;
                 break;
             }
 
-            // Simulate end of sequence at 50% of max tokens randomly
-            if token_idx > max_tokens / 2 && token_idx % 17 == 0 {
-                finish_reason = FinishReason::EndOfSequence;
+            // Prepare next batch for continued generation
+            batch.clear();
+            if let Err(e) = batch.add(token, n_cur as i32, &[0], true) {
+                error!("Failed to add continuation token: {}", e);
                 break;
             }
+
+            // Decode the new token
+            if let Err(e) = ctx.decode(&mut batch) {
+                error!("Failed to decode continuation batch: {}", e);
+                break;
+            }
+
+            n_cur += 1;
         }
 
         let generation_time = start_time.elapsed();
@@ -534,8 +611,8 @@ impl RequestQueue {
         worker_id: usize,
         request_id: String,
         request: &GenerationRequest,
-        _model: &LlamaModel,
-        _context: &LlamaContext<'_>,
+        model: &LlamaModel,
+        model_manager: &ModelManager,
         stream_sender: mpsc::Sender<Result<StreamChunk, QueueError>>,
         cancellation_token: &CancellationToken,
     ) -> Result<(), QueueError> {
@@ -550,104 +627,186 @@ impl RequestQueue {
         let prompt = Self::format_session_prompt(&request.session)?;
         debug!("Formatted prompt for streaming: {}", prompt);
 
-        // TODO: Replace with actual llama-cpp-2 streaming once API is confirmed
-        // For now, simulate streaming with proper cancellation support
+        // Create context for this inference
+        let mut ctx = match model_manager.create_context(model) {
+            Ok(context) => context,
+            Err(e) => {
+                error!("Failed to create context for streaming: {}", e);
+                let _ = stream_sender.try_send(Err(QueueError::WorkerError(format!(
+                    "Context creation failed: {}",
+                    e
+                ))));
+                return Ok(());
+            }
+        };
+
+        // Tokenize the prompt
+        let tokens_list = match model.str_to_token(&prompt, AddBos::Always) {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                error!("Failed to tokenize prompt for streaming: {}", e);
+                let _ = stream_sender.try_send(Err(QueueError::WorkerError(format!(
+                    "Tokenization failed: {}",
+                    e
+                ))));
+                return Ok(());
+            }
+        };
+
+        debug!(
+            "Tokenized prompt to {} tokens for streaming",
+            tokens_list.len()
+        );
+
+        // Create and process initial batch
+        let batch_size = 512;
+        let mut batch = LlamaBatch::new(batch_size, 1);
+
+        // Add prompt tokens to batch
+        for (i, token) in tokens_list.iter().enumerate() {
+            let is_last = i == tokens_list.len() - 1;
+            if let Err(e) = batch.add(*token, i as i32, &[0], is_last) {
+                error!("Failed to add token to streaming batch: {}", e);
+                let _ = stream_sender.try_send(Err(QueueError::WorkerError(format!(
+                    "Batch token add failed: {}",
+                    e
+                ))));
+                return Ok(());
+            }
+        }
+
+        // Process the initial prompt batch
+        if let Err(e) = ctx.decode(&mut batch) {
+            error!("Failed to decode streaming batch: {}", e);
+            let _ = stream_sender.try_send(Err(QueueError::WorkerError(format!(
+                "Batch decode failed: {}",
+                e
+            ))));
+            return Ok(());
+        }
+
+        debug!("Initial prompt processed for streaming, starting generation");
+
+        // Create sampler for token generation
+        let mut sampler = LlamaSampler::chain_simple([
+            LlamaSampler::dist(1234), // Use fixed seed for deterministic behavior
+            LlamaSampler::greedy(),
+        ]);
+
         let max_tokens = request.max_tokens.unwrap_or(512);
         let mut generated_text = String::new();
         let mut tokens_generated = 0u32;
+        let mut n_cur = tokens_list.len();
 
-        // Generate tokens one by one and stream them
-        for token_idx in 0..max_tokens {
-            // Check for cancellation before processing each token
+        // Generation loop - stream tokens one by one
+        while tokens_generated < max_tokens {
+            // Check for cancellation before each token
             if cancellation_token.is_cancelled() {
                 debug!(
                     "Worker {} streaming request {} cancelled during token generation",
                     worker_id, request_id
                 );
-                // Send cancellation error to stream
                 let _ = stream_sender.try_send(Err(QueueError::WorkerError(
-                    "Request cancelled".to_string()
+                    "Request cancelled".to_string(),
                 )));
-                return Ok(()); // Return Ok to avoid double error sending
+                return Ok(());
             }
 
-            // Simulate processing time
-            std::thread::sleep(Duration::from_millis(10));
+            // Sample next token
+            let token = sampler.sample(&ctx, batch.n_tokens() - 1);
 
-            // Generate mock text token
-            let token_text = if token_idx == 0 {
-                format!("Streaming response for session '{}' ", request.session.id)
-            } else if token_idx % 5 == 0 {
-                " word".to_string()
-            } else {
-                "x".to_string()
-            };
-
-            tokens_generated += 1;
-            generated_text.push_str(&token_text);
-
-            // Send the streaming chunk
-            let chunk = StreamChunk {
-                text: token_text,
-                is_complete: false,
-                token_count: tokens_generated,
-            };
-
-            if stream_sender.try_send(Ok(chunk)).is_err() {
-                warn!("Stream receiver disconnected, stopping generation");
-                break;
-            }
-
-            // Check for stop conditions
-            let mut should_stop_generation = false;
-            let finish_reason = if Self::should_stop(&generated_text, &request.stop_tokens) {
-                should_stop_generation = true;
-                FinishReason::StopToken
-            } else if token_idx > max_tokens / 2 && token_idx % 17 == 0 {
-                should_stop_generation = true;
-                FinishReason::EndOfSequence
-            } else {
-                FinishReason::MaxTokens
-            };
-
-            if should_stop_generation {
+            // Check for end of sequence token
+            if model.is_eog_token(token) {
                 // Send final completion chunk
                 let final_chunk = StreamChunk {
                     text: String::new(),
                     is_complete: true,
                     token_count: tokens_generated,
                 };
-
                 let _ = stream_sender.try_send(Ok(final_chunk));
-                
+
                 let generation_time = start_time.elapsed();
                 debug!(
-                    "Worker {} completed streaming inference for request {} in {:?} ({} tokens, reason: {:?})",
-                    worker_id, request_id, generation_time, tokens_generated, finish_reason
+                    "Worker {} completed streaming inference for request {} in {:?} ({} tokens, reason: EndOfSequence)",
+                    worker_id, request_id, generation_time, tokens_generated
                 );
-                
                 return Ok(());
             }
+
+            // Convert token to string
+            let token_text = match model.token_to_str(token, Special::Tokenize) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("Failed to convert token to string in streaming: {}", e);
+                    continue; // Skip this token but continue generation
+                }
+            };
+
+            generated_text.push_str(&token_text);
+            tokens_generated += 1;
+
+            // Send the streaming chunk immediately
+            let chunk = StreamChunk {
+                text: token_text.clone(),
+                is_complete: false,
+                token_count: tokens_generated,
+            };
+
+            if stream_sender.try_send(Ok(chunk)).is_err() {
+                warn!("Stream receiver disconnected, stopping generation");
+                return Ok(());
+            }
+
+            // Check for stop tokens in the accumulated generated text
+            if Self::should_stop(&generated_text, &request.stop_tokens) {
+                // Send final completion chunk
+                let final_chunk = StreamChunk {
+                    text: String::new(),
+                    is_complete: true,
+                    token_count: tokens_generated,
+                };
+                let _ = stream_sender.try_send(Ok(final_chunk));
+
+                let generation_time = start_time.elapsed();
+                debug!(
+                    "Worker {} completed streaming inference for request {} in {:?} ({} tokens, reason: StopToken)",
+                    worker_id, request_id, generation_time, tokens_generated
+                );
+                return Ok(());
+            }
+
+            // Prepare next batch for continued generation
+            batch.clear();
+            if let Err(e) = batch.add(token, n_cur as i32, &[0], true) {
+                error!("Failed to add continuation token for streaming: {}", e);
+                break;
+            }
+
+            // Decode the new token
+            if let Err(e) = ctx.decode(&mut batch) {
+                error!("Failed to decode continuation batch for streaming: {}", e);
+                break;
+            }
+
+            n_cur += 1;
         }
 
-        // Send final completion chunk if we reached max tokens
+        // If we exit the loop due to max tokens, send final completion chunk
         let final_chunk = StreamChunk {
             text: String::new(),
             is_complete: true,
             token_count: tokens_generated,
         };
-
         let _ = stream_sender.try_send(Ok(final_chunk));
 
         let generation_time = start_time.elapsed();
         debug!(
-            "Worker {} completed streaming inference for request {} in {:?} ({} tokens, max tokens reached)",
+            "Worker {} completed streaming inference for request {} in {:?} ({} tokens, reason: MaxTokens)",
             worker_id, request_id, generation_time, tokens_generated
         );
 
         Ok(())
     }
-
 }
 
 impl RequestQueue {
@@ -761,7 +920,9 @@ mod tests {
         // Handle the case where backend is already initialized by parallel tests
         let model_manager = match ModelManager::new(create_test_model_config()) {
             Ok(manager) => Arc::new(manager),
-            Err(ModelError::LoadingFailed(msg)) if msg.contains("Backend already initialized by external code") => {
+            Err(ModelError::LoadingFailed(msg))
+                if msg.contains("Backend already initialized by external code") =>
+            {
                 // This is expected when running tests in parallel - skip this test
                 println!("Skipping test due to backend already initialized by parallel test");
                 return;
@@ -779,7 +940,9 @@ mod tests {
         // Handle the case where backend is already initialized by parallel tests
         let model_manager = match ModelManager::new(create_test_model_config()) {
             Ok(manager) => Arc::new(manager),
-            Err(ModelError::LoadingFailed(msg)) if msg.contains("Backend already initialized by external code") => {
+            Err(ModelError::LoadingFailed(msg))
+                if msg.contains("Backend already initialized by external code") =>
+            {
                 // This is expected when running tests in parallel - skip this test
                 println!("Skipping test due to backend already initialized by parallel test");
                 return;

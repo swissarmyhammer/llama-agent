@@ -31,16 +31,17 @@ impl ModelManager {
                     // This is a limitation of llama-cpp-2 - we can't get a reference to an existing backend
                     // For now, we'll work around this by skipping backend initialization in tests
                     return Err(ModelError::LoadingFailed(
-                        "Backend already initialized by external code".to_string()
-                    ));
-                },
-                Err(e) => {
-                    return Err(ModelError::LoadingFailed(
-                        format!("Failed to initialize LlamaBackend: {}", e)
+                        "Backend already initialized by external code".to_string(),
                     ));
                 }
+                Err(e) => {
+                    return Err(ModelError::LoadingFailed(format!(
+                        "Failed to initialize LlamaBackend: {}",
+                        e
+                    )));
+                }
             };
-            
+
             // Try to store it globally, but don't fail if someone else beat us to it
             if GLOBAL_BACKEND.set(new_backend.clone()).is_err() {
                 // Someone else set it, use theirs instead
@@ -243,7 +244,7 @@ mod tests {
     #[tokio::test]
     async fn test_model_manager_creation() {
         let config = create_test_config_local(PathBuf::from("/tmp"), None);
-        
+
         // When running tests in parallel, the backend might already be initialized by another test
         match ModelManager::new(config) {
             Ok(manager) => {
@@ -253,7 +254,9 @@ mod tests {
                 let result = manager.with_model(|_model| ()).await;
                 assert!(result.is_err());
             }
-            Err(ModelError::LoadingFailed(msg)) if msg.contains("Backend already initialized by external code") => {
+            Err(ModelError::LoadingFailed(msg))
+                if msg.contains("Backend already initialized by external code") =>
+            {
                 // This is expected when running tests in parallel - one test initializes the backend
                 // and subsequent tests see it as already initialized. This is fine for the test.
                 println!("Backend already initialized by another test - this is expected in parallel test execution");
@@ -309,7 +312,7 @@ mod tests {
             PathBuf::from("/nonexistent/folder"),
             Some("model.gguf".to_string()),
         );
-        
+
         // When running tests in parallel, the backend might already be initialized by another test
         match ModelManager::new(config) {
             Ok(manager) => {
@@ -320,7 +323,9 @@ mod tests {
                     _ => panic!("Expected NotFound error"),
                 }
             }
-            Err(ModelError::LoadingFailed(msg)) if msg.contains("Backend already initialized by external code") => {
+            Err(ModelError::LoadingFailed(msg))
+                if msg.contains("Backend already initialized by external code") =>
+            {
                 // This is expected when running tests in parallel - one test initializes the backend
                 // and subsequent tests see it as already initialized. This is fine for the test.
                 println!("Backend already initialized by another test - this is expected in parallel test execution");
@@ -374,7 +379,7 @@ mod tests {
     #[tokio::test]
     async fn test_huggingface_config_creation() {
         let config = create_test_config_hf("microsoft/DialoGPT-medium".to_string(), None);
-        
+
         // When running tests in parallel, the backend might already be initialized by another test
         // This is expected and should not cause test failures
         match ModelManager::new(config) {
@@ -385,7 +390,9 @@ mod tests {
                 let result = manager.load_model().await;
                 assert!(result.is_err()); // Will fail since "microsoft/DialoGPT-medium" is not a local path
             }
-            Err(ModelError::LoadingFailed(msg)) if msg.contains("Backend already initialized by external code") => {
+            Err(ModelError::LoadingFailed(msg))
+                if msg.contains("Backend already initialized by external code") =>
+            {
                 // This is expected when running tests in parallel - one test initializes the backend
                 // and subsequent tests see it as already initialized. This is fine for the test.
                 println!("Backend already initialized by another test - this is expected in parallel test execution");
