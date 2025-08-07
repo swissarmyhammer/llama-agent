@@ -105,7 +105,7 @@ async fn run_agent(args: Args) -> Result<String> {
     };
 
     info!("Initializing model manager...");
-    let model_manager = Arc::new(ModelManager::new(model_config));
+    let model_manager = Arc::new(ModelManager::new(model_config)?);
 
     // Load the model
     if let Err(e) = model_manager.load_model().await {
