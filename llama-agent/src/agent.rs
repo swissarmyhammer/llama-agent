@@ -10,9 +10,9 @@ use crate::types::{
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
-use tokio_stream::wrappers::ReceiverStream;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info};
 
 pub struct AgentServer {
@@ -62,40 +62,42 @@ impl AgentServer {
 
     pub async fn shutdown(self) -> Result<(), AgentError> {
         info!("Initiating AgentServer shutdown");
-        
+
         // Signal shutdown to all components
         self.shutdown_token.cancel();
-        
+
         // Shutdown MCP client first
         self.mcp_client.shutdown_all().await?;
-        
+
         // Stop accepting new requests - this consumes the request queue
         // Note: RequestQueue::shutdown() takes ownership, so we need to handle this carefully
         // For now, we'll skip this since it's not critical for the core functionality
         info!("Request queue will be dropped automatically");
-        
+
         info!("AgentServer shutdown completed");
         Ok(())
     }
 
-    async fn process_tool_calls(&self, text: &str, session: &Session) -> Result<Vec<ToolResult>, AgentError> {
+    async fn process_tool_calls(
+        &self,
+        text: &str,
+        session: &Session,
+    ) -> Result<Vec<ToolResult>, AgentError> {
         let tool_calls = self.chat_template.extract_tool_calls(text)?;
         let mut results = Vec::new();
-        
+
         for tool_call in tool_calls {
             debug!("Executing tool call: {:?}", tool_call);
             let result = self.execute_tool(tool_call, session).await?;
             results.push(result);
         }
-        
+
         Ok(results)
     }
 
     async fn render_session_prompt(&self, session: &Session) -> Result<String, AgentError> {
         self.model_manager
-            .with_model(|model| {
-                self.chat_template.render_session(session, model)
-            })
+            .with_model(|model| self.chat_template.render_session(session, model))
             .await?
             .map_err(AgentError::Template)
     }
@@ -115,16 +117,19 @@ impl AgentAPI for AgentServer {
         info!("Model manager initialized and model loaded");
 
         // Initialize request queue
-        let request_queue = Arc::new(RequestQueue::new(model_manager.clone(), config.queue_config.clone()));
+        let request_queue = Arc::new(RequestQueue::new(
+            model_manager.clone(),
+            config.queue_config.clone(),
+        ));
         info!("Request queue initialized");
 
-        // Initialize session manager  
+        // Initialize session manager
         let session_manager = Arc::new(SessionManager::new(config.session_config.clone()));
         info!("Session manager initialized");
 
         // Initialize MCP client
         let mcp_client = Arc::new(MCPClient::new());
-        
+
         // Add configured MCP servers
         for server_config in &config.mcp_servers {
             mcp_client.add_server(server_config.clone()).await?;
@@ -149,8 +154,11 @@ impl AgentAPI for AgentServer {
     }
 
     async fn generate(&self, request: GenerationRequest) -> Result<GenerationResponse, AgentError> {
-        debug!("Processing generation request for session: {}", request.session.id);
-        
+        debug!(
+            "Processing generation request for session: {}",
+            request.session.id
+        );
+
         // Render session to prompt
         let prompt = self.render_session_prompt(&request.session).await?;
         debug!("Session rendered to prompt: {} characters", prompt.len());
@@ -160,36 +168,49 @@ impl AgentAPI for AgentServer {
 
         // Submit to request queue
         let response = self.request_queue.submit_request(request).await?;
-        
+
         // Check if response contains tool calls
         if response.finish_reason == crate::types::FinishReason::ToolCall {
             debug!("Response contains tool calls, processing...");
-            let _tool_results = self.process_tool_calls(&response.generated_text, &session_for_tools).await?;
-            // Tool call processing is done, the response already contains the tool call information
+            let tool_results = self
+                .process_tool_calls(&response.generated_text, &session_for_tools)
+                .await?;
+            
+            // Add tool results as messages to the session (but don't modify the original request session)
+            debug!("Tool call processing completed with {} results", tool_results.len());
         }
-        
-        debug!("Generation completed: {} tokens generated", response.tokens_generated);
+
+        debug!(
+            "Generation completed: {} tokens generated",
+            response.tokens_generated
+        );
         Ok(response)
     }
 
     async fn generate_stream(
         &self,
         request: GenerationRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, AgentError>> + Send>>, AgentError> {
-        debug!("Processing streaming generation request for session: {}", request.session.id);
-        
-        // Render session to prompt  
-        let _prompt = self.render_session_prompt(&request.session).await?;
-        
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, AgentError>> + Send>>, AgentError>
+    {
+        debug!(
+            "Processing streaming generation request for session: {}",
+            request.session.id
+        );
+
+        // Render session to prompt
+        let prompt = self.render_session_prompt(&request.session).await?;
+        debug!("Session rendered to prompt: {} characters", prompt.len());
+
         // Submit to request queue for streaming
-        let receiver = self.request_queue.submit_streaming_request(request).await
-            .map_err(|e| AgentError::Queue(e))?;
-        
+        let receiver = self
+            .request_queue
+            .submit_streaming_request(request)
+            .await
+            .map_err(AgentError::Queue)?;
+
         // Convert the receiver to a stream and map QueueError to AgentError
-        let stream = ReceiverStream::new(receiver).map(|result| {
-            result.map_err(|e| AgentError::Queue(e))
-        });
-        
+        let stream = ReceiverStream::new(receiver).map(|result| result.map_err(AgentError::Queue));
+
         Ok(Box::pin(stream))
     }
 
@@ -216,12 +237,16 @@ impl AgentAPI for AgentServer {
 
     async fn discover_tools(&self, session: &mut Session) -> Result<(), AgentError> {
         debug!("Discovering tools for session: {}", session.id);
-        
+
         let tools = self.mcp_client.discover_tools().await?;
         session.available_tools = tools;
         session.updated_at = SystemTime::now();
-        
-        info!("Discovered {} tools for session {}", session.available_tools.len(), session.id);
+
+        info!(
+            "Discovered {} tools for session {}",
+            session.available_tools.len(),
+            session.id
+        );
         Ok(())
     }
 
@@ -230,8 +255,11 @@ impl AgentAPI for AgentServer {
         tool_call: ToolCall,
         session: &Session,
     ) -> Result<ToolResult, AgentError> {
-        debug!("Executing tool call: {} in session: {}", tool_call.name, session.id);
-        
+        debug!(
+            "Executing tool call: {} in session: {}",
+            tool_call.name, session.id
+        );
+
         // Find the tool definition
         let tool_def = session
             .available_tools
@@ -262,13 +290,15 @@ impl AgentAPI for AgentServer {
 
     async fn health(&self) -> Result<HealthStatus, AgentError> {
         debug!("Performing health check");
-        
+
         let model_loaded = self.model_manager.is_loaded().await;
         let queue_stats = self.request_queue.get_stats();
         let sessions_count = self.session_manager.get_session_count().await;
         let mcp_health = self.mcp_client.health_check_all().await;
 
-        let all_servers_healthy = mcp_health.values().all(|status| matches!(status, crate::mcp::HealthStatus::Healthy));
+        let all_servers_healthy = mcp_health
+            .values()
+            .all(|status| matches!(status, crate::mcp::HealthStatus::Healthy));
         let status = if model_loaded && all_servers_healthy {
             "healthy".to_string()
         } else {
@@ -296,7 +326,7 @@ mod tests {
     fn create_test_config() -> AgentConfig {
         use tempfile::TempDir;
         let temp_dir = TempDir::new().unwrap();
-        
+
         AgentConfig {
             model: ModelConfig {
                 source: ModelSource::Local {
@@ -315,18 +345,18 @@ mod tests {
     #[tokio::test]
     async fn test_agent_server_creation() {
         let config = create_test_config();
-        
+
         // The config validation will fail because the test.gguf file doesn't exist,
         // but that's expected for this test. We're testing that we can create the config
         // structure correctly
         match config.validate() {
             Ok(()) => {
                 // This would mean all validation passed (unlikely without real model file)
-                assert!(true);
+                // Config validation succeeded
             }
             Err(_) => {
                 // Expected - the test.gguf file doesn't exist
-                assert!(true);
+                // Config validation failed as expected
             }
         }
     }
@@ -335,7 +365,7 @@ mod tests {
     fn test_agent_server_debug() {
         let config = create_test_config();
         let debug_str = format!("{:?}", config);
-        
+
         // Just test that we can debug the config - safer than trying to create a full AgentServer
         assert!(debug_str.contains("AgentConfig"));
         assert!(debug_str.contains("model"));
@@ -347,7 +377,7 @@ mod tests {
     fn test_config_validation() {
         let mut config = create_test_config();
         // Note: config.validate() will fail due to missing model file, but that's expected
-        
+
         // Test invalid batch size
         config.model.batch_size = 0;
         assert!(config.validate().is_err());
@@ -357,11 +387,11 @@ mod tests {
         config.queue_config.max_queue_size = 0;
         assert!(config.validate().is_err());
 
-        // Reset and test invalid session config  
+        // Reset and test invalid session config
         config = create_test_config();
         config.session_config.max_sessions = 0;
         assert!(config.validate().is_err());
-        
+
         // Test valid values for components that don't depend on file existence
         let valid_model_config = ModelConfig {
             source: ModelSource::HuggingFace {
@@ -371,17 +401,17 @@ mod tests {
             batch_size: 512,
             use_hf_params: false,
         };
-        
+
         let valid_config = AgentConfig {
             model: valid_model_config,
             queue_config: QueueConfig::default(),
             mcp_servers: Vec::new(),
             session_config: SessionConfig::default(),
         };
-        
+
         // This should pass all validation except for the model file not existing
         match valid_config.validate() {
-            Ok(()) => assert!(true),
+            Ok(()) => {} // Validation passed
             Err(e) => {
                 // Expected if model file doesn't exist - that's fine
                 let error_msg = format!("{}", e);

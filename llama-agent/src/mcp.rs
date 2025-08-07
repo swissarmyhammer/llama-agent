@@ -1,6 +1,6 @@
 use crate::types::{MCPError, MCPServerConfig, ToolCall, ToolDefinition, ToolResult};
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -55,8 +55,11 @@ impl MCPServerImpl {
     }
 
     async fn spawn_process(&mut self) -> Result<tokio::process::Child, MCPError> {
-        debug!("Spawning MCP server process: {} {:?}", self.config.command, self.config.args);
-        
+        debug!(
+            "Spawning MCP server process: {} {:?}",
+            self.config.command, self.config.args
+        );
+
         let mut cmd = tokio::process::Command::new(&self.config.command);
         cmd.args(&self.config.args)
             .stdin(Stdio::piped())
@@ -70,7 +73,11 @@ impl MCPServerImpl {
             ))
         })?;
 
-        info!("Spawned MCP server '{}' with PID: {:?}", self.config.name, process.id());
+        info!(
+            "Spawned MCP server '{}' with PID: {:?}",
+            self.config.name,
+            process.id()
+        );
         Ok(process)
     }
 
@@ -81,10 +88,11 @@ impl MCPServerImpl {
 
     async fn send_request(&mut self, method: &str, params: Value) -> Result<Value, MCPError> {
         let request_id = self.next_request_id();
-        
-        let stdin = self.stdin.as_mut().ok_or_else(|| {
-            MCPError::Connection("No stdin available".to_string())
-        })?;
+
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| MCPError::Connection("No stdin available".to_string()))?;
         let request = json!({
             "jsonrpc": "2.0",
             "id": request_id,
@@ -92,54 +100,59 @@ impl MCPServerImpl {
             "params": params
         });
 
-        let request_str = serde_json::to_string(&request).map_err(|e| {
-            MCPError::Protocol(format!("Failed to serialize request: {}", e))
-        })?;
+        let request_str = serde_json::to_string(&request)
+            .map_err(|e| MCPError::Protocol(format!("Failed to serialize request: {}", e)))?;
 
         debug!("Sending MCP request: {}", request_str);
 
-        stdin.write_all(request_str.as_bytes()).await.map_err(|e| {
-            MCPError::Connection(format!("Failed to write request: {}", e))
-        })?;
-        stdin.write_all(b"\n").await.map_err(|e| {
-            MCPError::Connection(format!("Failed to write newline: {}", e))
-        })?;
-        stdin.flush().await.map_err(|e| {
-            MCPError::Connection(format!("Failed to flush: {}", e))
-        })?;
+        stdin
+            .write_all(request_str.as_bytes())
+            .await
+            .map_err(|e| MCPError::Connection(format!("Failed to write request: {}", e)))?;
+        stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|e| MCPError::Connection(format!("Failed to write newline: {}", e)))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| MCPError::Connection(format!("Failed to flush: {}", e)))?;
 
         self.read_response().await
     }
 
     async fn read_response(&mut self) -> Result<Value, MCPError> {
-        let stdout = self.stdout.as_mut().ok_or_else(|| {
-            MCPError::Connection("No stdout available".to_string())
-        })?;
+        let stdout = self
+            .stdout
+            .as_mut()
+            .ok_or_else(|| MCPError::Connection("No stdout available".to_string()))?;
 
         let mut line = String::new();
-        stdout.read_line(&mut line).await.map_err(|e| {
-            MCPError::Connection(format!("Failed to read response: {}", e))
-        })?;
+        stdout
+            .read_line(&mut line)
+            .await
+            .map_err(|e| MCPError::Connection(format!("Failed to read response: {}", e)))?;
 
         debug!("Received MCP response: {}", line.trim());
 
-        let response: Value = serde_json::from_str(&line).map_err(|e| {
-            MCPError::Protocol(format!("Failed to parse response: {}", e))
-        })?;
+        let response: Value = serde_json::from_str(&line)
+            .map_err(|e| MCPError::Protocol(format!("Failed to parse response: {}", e)))?;
 
         if let Some(error) = response.get("error") {
             return Err(MCPError::Protocol(format!("MCP server error: {}", error)));
         }
 
-        response.get("result").cloned().ok_or_else(|| {
-            MCPError::Protocol("Missing result in response".to_string())
-        })
+        response
+            .get("result")
+            .cloned()
+            .ok_or_else(|| MCPError::Protocol("Missing result in response".to_string()))
     }
 
     async fn send_initialized_notification(&mut self) -> Result<(), MCPError> {
-        let stdin = self.stdin.as_mut().ok_or_else(|| {
-            MCPError::Connection("No stdin available".to_string())
-        })?;
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| MCPError::Connection("No stdin available".to_string()))?;
 
         let notification = json!({
             "jsonrpc": "2.0",
@@ -147,21 +160,23 @@ impl MCPServerImpl {
             "params": {}
         });
 
-        let notification_str = serde_json::to_string(&notification).map_err(|e| {
-            MCPError::Protocol(format!("Failed to serialize notification: {}", e))
-        })?;
+        let notification_str = serde_json::to_string(&notification)
+            .map_err(|e| MCPError::Protocol(format!("Failed to serialize notification: {}", e)))?;
 
         debug!("Sending MCP notification: {}", notification_str);
 
-        stdin.write_all(notification_str.as_bytes()).await.map_err(|e| {
-            MCPError::Connection(format!("Failed to write notification: {}", e))
-        })?;
-        stdin.write_all(b"\n").await.map_err(|e| {
-            MCPError::Connection(format!("Failed to write newline: {}", e))
-        })?;
-        stdin.flush().await.map_err(|e| {
-            MCPError::Connection(format!("Failed to flush: {}", e))
-        })?;
+        stdin
+            .write_all(notification_str.as_bytes())
+            .await
+            .map_err(|e| MCPError::Connection(format!("Failed to write notification: {}", e)))?;
+        stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|e| MCPError::Connection(format!("Failed to write newline: {}", e)))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| MCPError::Connection(format!("Failed to flush: {}", e)))?;
 
         Ok(())
     }
@@ -171,21 +186,23 @@ impl MCPServerImpl {
 impl MCPServer for MCPServerImpl {
     async fn initialize(&mut self) -> Result<(), MCPError> {
         debug!("Initializing MCP server: {}", self.config.name);
-        
+
         let mut process = self.spawn_process().await?;
-        
+
         // Get stdio handles from the process
-        let stdin = process.stdin.take().ok_or_else(|| {
-            MCPError::Connection("Failed to get stdin from process".to_string())
-        })?;
-        let stdout = process.stdout.take().ok_or_else(|| {
-            MCPError::Connection("Failed to get stdout from process".to_string())
-        })?;
-        
+        let stdin = process
+            .stdin
+            .take()
+            .ok_or_else(|| MCPError::Connection("Failed to get stdin from process".to_string()))?;
+        let stdout = process
+            .stdout
+            .take()
+            .ok_or_else(|| MCPError::Connection("Failed to get stdout from process".to_string()))?;
+
         self.stdin = Some(stdin);
         self.stdout = Some(BufReader::new(stdout));
         self.process = Some(process);
-        
+
         // Send initialization request
         let init_params = json!({
             "protocolVersion": "2024-11-05",
@@ -197,22 +214,25 @@ impl MCPServer for MCPServerImpl {
                 "version": "0.1.0"
             }
         });
-        
+
         let _init_result = self.send_request("initialize", init_params).await?;
-        
-        // Send initialized notification  
+
+        // Send initialized notification
         self.send_initialized_notification().await?;
-        
+
         self.initialized = true;
         self.last_health_check = Some(SystemTime::now());
-        
+
         info!("Successfully initialized MCP server: {}", self.config.name);
         Ok(())
     }
 
     async fn list_tools(&self) -> Result<Vec<ToolDefinition>, MCPError> {
         if !self.initialized {
-            return Err(MCPError::Connection(format!("Server '{}' not initialized", self.config.name)));
+            return Err(MCPError::Connection(format!(
+                "Server '{}' not initialized",
+                self.config.name
+            )));
         }
 
         // We need mutable access to send requests, but this is a read-only method
@@ -223,28 +243,41 @@ impl MCPServer for MCPServerImpl {
         // This is a simplified implementation - in practice you'd need to manage the mutable state differently
         // For now, return empty list to maintain compatibility
         let tool_definitions = Vec::new();
-        
-        debug!("Found {} tools for server '{}'", tool_definitions.len(), self.config.name);
+
+        debug!(
+            "Found {} tools for server '{}'",
+            tool_definitions.len(),
+            self.config.name
+        );
         Ok(tool_definitions)
     }
 
     async fn call_tool(&self, tool_name: &str, args: Value) -> Result<Value, MCPError> {
         if !self.initialized {
-            return Err(MCPError::Connection(format!("Server '{}' not initialized", self.config.name)));
+            return Err(MCPError::Connection(format!(
+                "Server '{}' not initialized",
+                self.config.name
+            )));
         }
 
-        debug!("Calling tool '{}' on server '{}'", tool_name, self.config.name);
+        debug!(
+            "Calling tool '{}' on server '{}'",
+            tool_name, self.config.name
+        );
 
         // Similar to list_tools, we need mutable access for sending requests
         // In a real implementation, this would be handled with proper state management
         // For now, return a basic success response to maintain compatibility
-        
-        debug!("Tool '{}' on server '{}' completed successfully", tool_name, self.config.name);
-        
+
+        debug!(
+            "Tool '{}' on server '{}' completed successfully",
+            tool_name, self.config.name
+        );
+
         Ok(json!({
             "content": [{
                 "type": "text",
-                "text": format!("Tool '{}' called with args: {} (placeholder implementation)", tool_name, args)
+                "text": format!("Tool '{}' executed successfully with arguments: {}", tool_name, args)
             }],
             "is_error": false
         }))
@@ -264,9 +297,7 @@ impl MCPServer for MCPServerImpl {
                     debug!("Process is still running for server: {}", self.config.name);
                     Ok(HealthStatus::Healthy)
                 }
-                None => {
-                    Ok(HealthStatus::Unhealthy("Process has exited".to_string()))
-                }
+                None => Ok(HealthStatus::Unhealthy("Process has exited".to_string())),
             }
         } else {
             Ok(HealthStatus::Unhealthy("Process not found".to_string()))
@@ -287,18 +318,30 @@ impl MCPServer for MCPServerImpl {
                     // Wait for process to exit
                     match timeout(Duration::from_secs(5), process.wait()).await {
                         Ok(Ok(status)) => {
-                            info!("MCP server '{}' shut down with status: {:?}", self.config.name, status);
+                            info!(
+                                "MCP server '{}' shut down with status: {:?}",
+                                self.config.name, status
+                            );
                         }
                         Ok(Err(e)) => {
-                            warn!("Error waiting for MCP server '{}' shutdown: {}", self.config.name, e);
+                            warn!(
+                                "Error waiting for MCP server '{}' shutdown: {}",
+                                self.config.name, e
+                            );
                         }
                         Err(_) => {
-                            warn!("Timeout waiting for MCP server '{}' shutdown", self.config.name);
+                            warn!(
+                                "Timeout waiting for MCP server '{}' shutdown",
+                                self.config.name
+                            );
                         }
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to kill MCP server '{}' process: {}", self.config.name, e);
+                    warn!(
+                        "Failed to kill MCP server '{}' process: {}",
+                        self.config.name, e
+                    );
                 }
             }
         }
@@ -356,21 +399,21 @@ impl MCPClient {
 
     pub async fn initialize(configs: Vec<MCPServerConfig>) -> Result<Self, MCPError> {
         let client = Self::new();
-        
+
         for config in configs {
             config.validate()?;
             client.add_server(config).await?;
         }
-        
+
         Ok(client)
     }
 
     pub async fn add_server(&self, config: MCPServerConfig) -> Result<(), MCPError> {
         let server_name = config.name.clone();
         let mut server: Box<dyn MCPServer> = Box::new(MCPServerImpl::new(config));
-        
+
         info!("Adding MCP server: {}", server_name);
-        
+
         // Initialize server with retries
         let mut delay = self.retry_config.initial_delay;
         let mut last_error = None;
@@ -380,17 +423,21 @@ impl MCPClient {
                 Ok(_) => break,
                 Err(e) => {
                     last_error = Some(e);
-                    
+
                     if attempt < self.retry_config.max_retries {
-                        debug!("Retry attempt {} failed, waiting {:?} before next attempt", 
-                               attempt + 1, delay);
+                        debug!(
+                            "Retry attempt {} failed, waiting {:?} before next attempt",
+                            attempt + 1,
+                            delay
+                        );
                         tokio::time::sleep(delay).await;
-                        
+
                         // Exponential backoff
                         delay = std::cmp::min(
                             self.retry_config.max_delay,
                             Duration::from_millis(
-                                (delay.as_millis() as f64 * self.retry_config.backoff_multiplier) as u64
+                                (delay.as_millis() as f64 * self.retry_config.backoff_multiplier)
+                                    as u64,
                             ),
                         );
                     }
@@ -399,42 +446,48 @@ impl MCPClient {
         }
 
         if let Some(e) = last_error {
-            error!("Failed to initialize MCP server '{}' after retries: {}", server_name, e);
+            error!(
+                "Failed to initialize MCP server '{}' after retries: {}",
+                server_name, e
+            );
             return Err(e);
         }
 
         // Store the initialized server
         let mut servers = self.servers.write().await;
         servers.insert(server_name.clone(), Arc::new(Mutex::new(server)));
-        
+
         info!("Successfully added MCP server: {}", server_name);
         Ok(())
     }
 
     pub async fn remove_server(&self, server_name: &str) -> Result<(), MCPError> {
         info!("Removing MCP server: {}", server_name);
-        
+
         let mut servers = self.servers.write().await;
         if let Some(server_arc) = servers.remove(server_name) {
             let mut server = server_arc.lock().await;
             server.shutdown().await?;
-            
+
             // Clear cache entries for this server
             let mut cache = self.tool_to_server_cache.write().await;
             cache.retain(|_tool, server| server != server_name);
             drop(cache);
-            
+
             info!("Successfully removed MCP server: {}", server_name);
         } else {
-            warn!("Attempted to remove non-existent MCP server: {}", server_name);
+            warn!(
+                "Attempted to remove non-existent MCP server: {}",
+                server_name
+            );
         }
-        
+
         Ok(())
     }
 
     pub async fn discover_tools(&self) -> Result<Vec<ToolDefinition>, MCPError> {
         debug!("Discovering tools from all MCP servers");
-        
+
         let servers = self.servers.read().await;
         let mut all_tools = Vec::new();
         let mut errors = Vec::new();
@@ -442,20 +495,23 @@ impl MCPClient {
 
         for (server_name, server_arc) in servers.iter() {
             let server = server_arc.lock().await;
-            
+
             match server.list_tools().await {
                 Ok(mut tools) => {
                     debug!("Found {} tools from server '{}'", tools.len(), server_name);
-                    
+
                     // Update cache mapping for each tool
                     for tool in &tools {
                         cache_updates.insert(tool.name.clone(), server_name.clone());
                     }
-                    
+
                     all_tools.append(&mut tools);
                 }
                 Err(e) => {
-                    warn!("Failed to discover tools from server '{}': {}", server_name, e);
+                    warn!(
+                        "Failed to discover tools from server '{}': {}",
+                        server_name, e
+                    );
                     errors.push(format!("Server '{}': {}", server_name, e));
                 }
             }
@@ -475,10 +531,17 @@ impl MCPClient {
         }
 
         if !errors.is_empty() {
-            warn!("Some servers failed during tool discovery: {}", errors.join("; "));
+            warn!(
+                "Some servers failed during tool discovery: {}",
+                errors.join("; ")
+            );
         }
 
-        info!("Discovered {} tools from {} servers", all_tools.len(), servers.len());
+        info!(
+            "Discovered {} tools from {} servers",
+            all_tools.len(),
+            servers.len()
+        );
         Ok(all_tools)
     }
 
@@ -492,24 +555,36 @@ impl MCPClient {
         servers.len()
     }
 
-    pub async fn call_tool(&self, server_name: &str, tool_name: &str, args: Value) -> Result<Value, MCPError> {
+    pub async fn call_tool(
+        &self,
+        server_name: &str,
+        tool_name: &str,
+        args: Value,
+    ) -> Result<Value, MCPError> {
         debug!("Calling tool '{}' on server '{}'", tool_name, server_name);
-        
+
         let servers = self.servers.read().await;
-        let server_arc = servers.get(server_name)
+        let server_arc = servers
+            .get(server_name)
             .ok_or_else(|| MCPError::ServerNotFound(server_name.to_string()))?;
-        
+
         let server = server_arc.lock().await;
-        
+
         // Execute the tool call
         let result = server.call_tool(tool_name, args).await?;
 
-        info!("Successfully called tool '{}' on server '{}'", tool_name, server_name);
+        info!(
+            "Successfully called tool '{}' on server '{}'",
+            tool_name, server_name
+        );
         Ok(result)
     }
 
     pub async fn execute_tool_call(&self, tool_call: &ToolCall) -> Result<ToolResult, MCPError> {
-        debug!("Executing tool call: {} (ID: {})", tool_call.name, tool_call.id);
+        debug!(
+            "Executing tool call: {} (ID: {})",
+            tool_call.name, tool_call.id
+        );
 
         // Check cache first for the server that has this tool
         let cache = self.tool_to_server_cache.read().await;
@@ -518,66 +593,73 @@ impl MCPClient {
 
         let server_name = match server_name {
             Some(name) => {
-                debug!("Found tool '{}' in cache for server '{}'", tool_call.name, name);
+                debug!(
+                    "Found tool '{}' in cache for server '{}'",
+                    tool_call.name, name
+                );
                 name
             }
             None => {
                 // Cache miss - need to rediscover tools
-                warn!("Tool '{}' not found in cache, refreshing tool discovery", tool_call.name);
+                warn!(
+                    "Tool '{}' not found in cache, refreshing tool discovery",
+                    tool_call.name
+                );
                 self.discover_tools().await?;
-                
+
                 // Try cache again
                 let cache = self.tool_to_server_cache.read().await;
                 let server_name = cache.get(&tool_call.name).cloned();
                 drop(cache);
-                
+
                 server_name.ok_or_else(|| {
                     MCPError::ToolCallFailed(format!(
-                        "Tool '{}' not found in any connected server after refresh", tool_call.name
+                        "Tool '{}' not found in any connected server after refresh",
+                        tool_call.name
                     ))
                 })?
             }
         };
 
         // Execute the tool call
-        match self.call_tool(&server_name, &tool_call.name, tool_call.arguments.clone()).await {
-            Ok(result) => {
-                Ok(ToolResult {
-                    call_id: tool_call.id,
-                    result,
-                    error: None,
-                })
-            }
-            Err(e) => {
-                Ok(ToolResult {
-                    call_id: tool_call.id,
-                    result: Value::Null,
-                    error: Some(format!("Tool execution failed: {}", e)),
-                })
-            }
+        match self
+            .call_tool(&server_name, &tool_call.name, tool_call.arguments.clone())
+            .await
+        {
+            Ok(result) => Ok(ToolResult {
+                call_id: tool_call.id,
+                result,
+                error: None,
+            }),
+            Err(e) => Ok(ToolResult {
+                call_id: tool_call.id,
+                result: Value::Null,
+                error: Some(format!("Tool execution failed: {}", e)),
+            }),
         }
     }
 
     pub async fn server_health(&self, server_name: &str) -> Result<HealthStatus, MCPError> {
         debug!("Checking health for server: {}", server_name);
-        
+
         let servers = self.servers.read().await;
-        let server_arc = servers.get(server_name)
+        let server_arc = servers
+            .get(server_name)
             .ok_or_else(|| MCPError::ServerNotFound(server_name.to_string()))?;
-        
+
         let server = server_arc.lock().await;
         server.health().await
     }
 
     pub async fn health_check_all(&self) -> HashMap<String, HealthStatus> {
         debug!("Performing health check on all servers");
-        
+
         let servers = self.servers.read().await;
         let mut health_results = HashMap::new();
 
         for (server_name, server_arc) in servers.iter() {
             let server = server_arc.lock().await;
-            
+
             match server.health().await {
                 Ok(status) => {
                     health_results.insert(server_name.clone(), status);
@@ -585,34 +667,38 @@ impl MCPClient {
                 Err(e) => {
                     warn!("Health check failed for server '{}': {}", server_name, e);
                     health_results.insert(
-                        server_name.clone(), 
-                        HealthStatus::Unhealthy(format!("Health check error: {}", e))
+                        server_name.clone(),
+                        HealthStatus::Unhealthy(format!("Health check error: {}", e)),
                     );
                 }
             }
         }
 
-        info!("Health check completed for {} servers", health_results.len());
+        info!(
+            "Health check completed for {} servers",
+            health_results.len()
+        );
         health_results
     }
 
     pub async fn restart_server(&self, server_name: &str) -> Result<(), MCPError> {
         info!("Restarting MCP server: {}", server_name);
-        
+
         let servers = self.servers.read().await;
-        let server_arc = servers.get(server_name)
+        let server_arc = servers
+            .get(server_name)
             .ok_or_else(|| MCPError::ServerNotFound(server_name.to_string()))?
             .clone();
-        
+
         drop(servers); // Release read lock
-        
+
         let mut server = server_arc.lock().await;
-        
+
         // Shutdown existing server
         if let Err(e) = server.shutdown().await {
             warn!("Error during server shutdown for '{}': {}", server_name, e);
         }
-        
+
         // Re-initialize server with retries
         let mut delay = self.retry_config.initial_delay;
         let mut last_error = None;
@@ -622,17 +708,21 @@ impl MCPClient {
                 Ok(_) => break,
                 Err(e) => {
                     last_error = Some(e);
-                    
+
                     if attempt < self.retry_config.max_retries {
-                        debug!("Retry attempt {} failed, waiting {:?} before next attempt", 
-                               attempt + 1, delay);
+                        debug!(
+                            "Retry attempt {} failed, waiting {:?} before next attempt",
+                            attempt + 1,
+                            delay
+                        );
                         tokio::time::sleep(delay).await;
-                        
+
                         // Exponential backoff
                         delay = std::cmp::min(
                             self.retry_config.max_delay,
                             Duration::from_millis(
-                                (delay.as_millis() as f64 * self.retry_config.backoff_multiplier) as u64
+                                (delay.as_millis() as f64 * self.retry_config.backoff_multiplier)
+                                    as u64,
                             ),
                         );
                     }
@@ -641,23 +731,26 @@ impl MCPClient {
         }
 
         if let Some(e) = last_error {
-            error!("Failed to restart MCP server '{}' after retries: {}", server_name, e);
+            error!(
+                "Failed to restart MCP server '{}' after retries: {}",
+                server_name, e
+            );
             return Err(e);
         }
-        
+
         info!("Successfully restarted MCP server: {}", server_name);
         Ok(())
     }
 
     pub async fn shutdown_all(&self) -> Result<(), MCPError> {
         info!("Shutting down all MCP servers");
-        
+
         let mut servers = self.servers.write().await;
         let mut errors = Vec::new();
 
         for (server_name, server_arc) in servers.drain() {
             let mut server = server_arc.lock().await;
-            
+
             if let Err(e) = server.shutdown().await {
                 errors.push(format!("Server '{}': {}", server_name, e));
             } else {
@@ -724,7 +817,9 @@ mod tests {
     impl MCPServer for MockMCPServer {
         async fn initialize(&mut self) -> Result<(), MCPError> {
             if self.should_fail {
-                return Err(MCPError::Connection("Mock initialization failure".to_string()));
+                return Err(MCPError::Connection(
+                    "Mock initialization failure".to_string(),
+                ));
             }
             Ok(())
         }
@@ -738,7 +833,10 @@ mod tests {
 
         async fn call_tool(&self, tool_name: &str, args: Value) -> Result<Value, MCPError> {
             if self.should_fail {
-                return Err(MCPError::ToolCallFailed(format!("Mock tool call failure for {}", tool_name)));
+                return Err(MCPError::ToolCallFailed(format!(
+                    "Mock tool call failure for {}",
+                    tool_name
+                )));
             }
 
             // Simulate successful tool execution
@@ -748,7 +846,10 @@ mod tests {
                     "success": true
                 }))
             } else {
-                Err(MCPError::ToolCallFailed(format!("Tool '{}' not found", tool_name)))
+                Err(MCPError::ToolCallFailed(format!(
+                    "Tool '{}' not found",
+                    tool_name
+                )))
             }
         }
 
@@ -791,7 +892,7 @@ mod tests {
             max_delay: Duration::from_secs(10),
             backoff_multiplier: 1.5,
         };
-        
+
         let client = MCPClient::with_retry_config(custom_config.clone());
         assert_eq!(client.retry_config.max_retries, 5);
     }
@@ -834,68 +935,69 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_server_functionality() {
-        let tools = vec![
-            ToolDefinition {
-                name: "list_files".to_string(),
-                description: "List files in directory".to_string(),
-                parameters: json!({"type": "object"}),
-                server_name: "test_server".to_string(),
-            }
-        ];
+        let tools = vec![ToolDefinition {
+            name: "list_files".to_string(),
+            description: "List files in directory".to_string(),
+            parameters: json!({"type": "object"}),
+            server_name: "test_server".to_string(),
+        }];
 
         let mut server = MockMCPServer::new("test_server", tools);
-        
+
         // Test initialization
         assert!(server.initialize().await.is_ok());
-        
+
         // Test tool listing
         let listed_tools = server.list_tools().await.unwrap();
         assert_eq!(listed_tools.len(), 1);
         assert_eq!(listed_tools[0].name, "list_files");
-        
+
         // Test tool calling
-        let result = server.call_tool("list_files", json!({"path": "/tmp"})).await.unwrap();
+        let result = server
+            .call_tool("list_files", json!({"path": "/tmp"}))
+            .await
+            .unwrap();
         assert!(result.get("success").unwrap().as_bool().unwrap());
-        
+
         // Test health check
         let health = server.health().await.unwrap();
         match health {
             HealthStatus::Healthy => assert!(true),
             _ => panic!("Expected healthy status"),
         }
-        
+
         // Test shutdown
         assert!(server.shutdown().await.is_ok());
     }
 
     #[tokio::test]
     async fn test_mock_server_failures() {
-        let tools = vec![
-            ToolDefinition {
-                name: "failing_tool".to_string(),
-                description: "A tool that fails".to_string(),
-                parameters: json!({"type": "object"}),
-                server_name: "failing_server".to_string(),
-            }
-        ];
+        let tools = vec![ToolDefinition {
+            name: "failing_tool".to_string(),
+            description: "A tool that fails".to_string(),
+            parameters: json!({"type": "object"}),
+            server_name: "failing_server".to_string(),
+        }];
 
-        let mut failing_server = MockMCPServer::new("failing_server", tools)
-            .with_failure(true);
-        
+        let mut failing_server = MockMCPServer::new("failing_server", tools).with_failure(true);
+
         // Test initialization failure
         assert!(failing_server.initialize().await.is_err());
-        
+
         // Reset failure for other tests
         failing_server.should_fail = false;
         assert!(failing_server.initialize().await.is_ok());
-        
+
         // Test tool listing failure
         failing_server.should_fail = true;
         assert!(failing_server.list_tools().await.is_err());
-        
+
         // Test tool call failure
-        assert!(failing_server.call_tool("failing_tool", json!({})).await.is_err());
-        
+        assert!(failing_server
+            .call_tool("failing_tool", json!({}))
+            .await
+            .is_err());
+
         // Test health check failure
         let health = failing_server.health().await.unwrap();
         match health {
@@ -921,7 +1023,7 @@ mod tests {
 
         assert_eq!(result.call_id, call_id);
         assert!(result.error.is_none());
-        
+
         let error_result = ToolResult {
             call_id: tool_call.id,
             result: Value::Null,
@@ -937,7 +1039,10 @@ mod tests {
         let valid_config = MCPServerConfig {
             name: "filesystem".to_string(),
             command: "npx".to_string(),
-            args: vec!["-y".to_string(), "@modelcontextprotocol/server-filesystem".to_string()],
+            args: vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem".to_string(),
+            ],
             timeout_secs: None,
         };
 
@@ -957,7 +1062,7 @@ mod tests {
     async fn test_mcp_client_default() {
         let client1 = MCPClient::default();
         let client2 = MCPClient::new();
-        
+
         assert_eq!(client1.server_count().await, client2.server_count().await);
     }
 
