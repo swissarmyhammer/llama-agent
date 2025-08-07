@@ -42,3 +42,22 @@ futures = "0.3"
 
 # Test dependencies
 tempfile = "3.0"
+proptest = "1.0"
+mockall = "0.12"
+
+# Workspace-level package for integration tests
+[package]
+name = "llama-agent-workspace"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+llama-agent = { path = "llama-agent" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+proptest = { workspace = true }
+mockall = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+ulid = { workspace = true }

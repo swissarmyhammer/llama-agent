@@ -904,7 +904,7 @@ mod tests {
         let unknown = HealthStatus::Unknown;
 
         match healthy {
-            HealthStatus::Healthy => assert!(true),
+            HealthStatus::Healthy => {},
             _ => panic!("Expected Healthy status"),
         }
 
@@ -914,7 +914,7 @@ mod tests {
         }
 
         match unknown {
-            HealthStatus::Unknown => assert!(true),
+            HealthStatus::Unknown => {},
             _ => panic!("Expected Unknown status"),
         }
     }
@@ -962,7 +962,7 @@ mod tests {
         // Test health check
         let health = server.health().await.unwrap();
         match health {
-            HealthStatus::Healthy => assert!(true),
+            HealthStatus::Healthy => {},
             _ => panic!("Expected healthy status"),
         }
 
@@ -1001,7 +1001,7 @@ mod tests {
         // Test health check failure
         let health = failing_server.health().await.unwrap();
         match health {
-            HealthStatus::Unhealthy(_) => assert!(true),
+            HealthStatus::Unhealthy(_) => {},
             _ => panic!("Expected unhealthy status"),
         }
     }
