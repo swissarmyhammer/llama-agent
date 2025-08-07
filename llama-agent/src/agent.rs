@@ -175,9 +175,12 @@ impl AgentAPI for AgentServer {
             let tool_results = self
                 .process_tool_calls(&response.generated_text, &session_for_tools)
                 .await?;
-            
+
             // Add tool results as messages to the session (but don't modify the original request session)
-            debug!("Tool call processing completed with {} results", tool_results.len());
+            debug!(
+                "Tool call processing completed with {} results",
+                tool_results.len()
+            );
         }
 
         debug!(
