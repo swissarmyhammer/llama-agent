@@ -2,7 +2,7 @@ use llama_agent::{
     agent::AgentServer,
     types::{
         AgentAPI, AgentConfig, FinishReason, MCPServerConfig, Message, MessageRole, ModelConfig,
-        ModelSource, QueueConfig, Session, SessionConfig, SessionId, ToolCall, ToolCallId,
+        ModelSource, ParallelExecutionConfig, QueueConfig, Session, SessionConfig, SessionId, ToolCall, ToolCallId,
         ToolDefinition, ToolResult,
     },
 };
@@ -35,6 +35,7 @@ async fn test_tool_call_detection() {
         queue_config: QueueConfig::default(),
         mcp_servers: Vec::new(),
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     // The initialization will fail due to the fake model file, but that's expected

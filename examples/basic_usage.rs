@@ -13,7 +13,7 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, QueueConfig, SessionConfig,
+        MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -52,6 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout_secs: None,
         }],
         session_config: SessionConfig::default(),
+        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     info!("Initializing AgentServer (this may take a while for model loading)...");
