@@ -50,6 +50,8 @@ pub struct QueueMetrics {
     pub current_queue_size: AtomicUsize,
     pub total_processing_time_ms: AtomicU64,
     pub total_tokens_generated: AtomicU64,
+    pub peak_memory_usage_bytes: AtomicU64,
+    pub current_memory_usage_bytes: AtomicU64,
 }
 
 impl QueueMetrics {
@@ -63,6 +65,8 @@ impl QueueMetrics {
             current_queue_size: AtomicUsize::new(0),
             total_processing_time_ms: AtomicU64::new(0),
             total_tokens_generated: AtomicU64::new(0),
+            peak_memory_usage_bytes: AtomicU64::new(0),
+            current_memory_usage_bytes: AtomicU64::new(0),
         }
     }
 
@@ -95,6 +99,36 @@ impl QueueMetrics {
         self.current_queue_size.fetch_sub(1, Ordering::Relaxed);
     }
 
+    /// Update memory usage metrics (estimated based on request size)
+    pub fn update_memory_usage(&self, estimated_memory_bytes: u64) {
+        self.current_memory_usage_bytes
+            .store(estimated_memory_bytes, Ordering::Relaxed);
+
+        // Update peak usage if current exceeds previous peak
+        let mut current_peak = self.peak_memory_usage_bytes.load(Ordering::Relaxed);
+        while estimated_memory_bytes > current_peak {
+            match self.peak_memory_usage_bytes.compare_exchange_weak(
+                current_peak,
+                estimated_memory_bytes,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(new_peak) => current_peak = new_peak,
+            }
+        }
+    }
+
+    /// Get current memory usage estimate
+    pub fn get_current_memory_usage(&self) -> u64 {
+        self.current_memory_usage_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Get peak memory usage
+    pub fn get_peak_memory_usage(&self) -> u64 {
+        self.peak_memory_usage_bytes.load(Ordering::Relaxed)
+    }
+
     pub fn get_stats(&self) -> QueueStats {
         QueueStats {
             total_requests: self.total_requests.load(Ordering::Relaxed),
@@ -113,6 +147,8 @@ impl QueueMetrics {
                 }
             },
             total_tokens_generated: self.total_tokens_generated.load(Ordering::Relaxed),
+            current_memory_usage_bytes: self.current_memory_usage_bytes.load(Ordering::Relaxed),
+            peak_memory_usage_bytes: self.peak_memory_usage_bytes.load(Ordering::Relaxed),
         }
     }
 }
@@ -127,6 +163,8 @@ pub struct QueueStats {
     pub current_queue_size: usize,
     pub average_processing_time_ms: u64,
     pub total_tokens_generated: u64,
+    pub current_memory_usage_bytes: u64,
+    pub peak_memory_usage_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -149,6 +187,40 @@ pub struct RequestQueue {
 }
 
 impl RequestQueue {
+    /// Calculate optimal batch size based on token count and system resources
+    fn calculate_optimal_batch_size(
+        token_count: usize,
+        min_batch: usize,
+        max_batch: usize,
+    ) -> usize {
+        // Base calculation on token count with performance considerations
+        let base_size = (token_count / 4).clamp(min_batch, max_batch);
+
+        // Adjust based on available CPU cores for better parallelization
+        let cpu_factor = (num_cpus::get() / 2).max(1).min(4);
+        let optimized_size = base_size * cpu_factor;
+
+        // Ensure we stay within reasonable bounds for memory usage
+        optimized_size.clamp(min_batch, max_batch)
+    }
+
+    /// Calculate optimal worker count based on system resources
+    fn calculate_optimal_worker_count(requested_workers: usize) -> usize {
+        let cpu_count = num_cpus::get();
+
+        // For inference workloads, we don't need as many workers as CPUs
+        // since most work is done by the ML model which has its own threading
+        let optimal_count = match cpu_count {
+            1..=2 => 1,                         // Single worker for low-core systems
+            3..=4 => 2,                         // Dual workers for mid-range systems
+            5..=8 => cpu_count / 2,             // Half the cores for reasonable systems
+            _ => (cpu_count / 3).max(4).min(8), // Cap at 8 workers for high-core systems
+        };
+
+        // Respect user configuration but provide optimization
+        requested_workers.min(optimal_count).max(1)
+    }
+
     pub fn new(model_manager: Arc<ModelManager>, config: QueueConfig) -> Self {
         let (sender, receiver) = mpsc::channel(config.max_queue_size);
         let receiver = Arc::new(Mutex::new(receiver));
@@ -157,8 +229,15 @@ impl RequestQueue {
 
         let mut worker_handles = Vec::new();
 
+        // Optimize worker thread count based on system resources and workload characteristics
+        let optimal_worker_count = Self::calculate_optimal_worker_count(config.worker_threads);
+        info!(
+            "Using {} optimized worker threads (requested: {})",
+            optimal_worker_count, config.worker_threads
+        );
+
         // Spawn worker threads
-        for worker_id in 0..config.worker_threads {
+        for worker_id in 0..optimal_worker_count {
             let receiver = receiver.clone();
             let model_manager = model_manager.clone();
             let config = config.clone();
@@ -218,7 +297,9 @@ impl RequestQueue {
         if self.sender.try_send(queued_request).is_err() {
             warn!("Queue is full, rejecting request");
             self.metrics.record_request_failed(); // Adjust queue size back down
-            return Err(QueueError::Full);
+            return Err(QueueError::Full {
+                capacity: self.config.max_queue_size,
+            });
         }
 
         // Wait for response with timeout
@@ -232,7 +313,9 @@ impl RequestQueue {
             }
             Err(_) => {
                 warn!("Request timed out after {:?}", self.config.request_timeout);
-                Err(QueueError::Timeout)
+                Err(QueueError::Timeout {
+                    duration: self.config.request_timeout,
+                })
             }
         }
     }
@@ -242,8 +325,10 @@ impl RequestQueue {
         request: GenerationRequest,
     ) -> Result<mpsc::Receiver<Result<StreamChunk, QueueError>>, QueueError> {
         let (response_sender, _) = oneshot::channel();
-        // Use larger buffer for streaming to prevent backpressure
-        let buffer_size = std::cmp::max(100, request.max_tokens.unwrap_or(512) as usize);
+        // Use optimized buffer size for streaming to prevent backpressure while managing memory
+        let base_buffer = request.max_tokens.unwrap_or(512) as usize;
+        let cpu_factor = (num_cpus::get() / 2).max(1).min(4);
+        let buffer_size = (base_buffer / 4).max(50).min(1000) * cpu_factor;
         let (stream_sender, stream_receiver) = mpsc::channel(buffer_size);
 
         let queued_request = QueuedRequest {
@@ -267,7 +352,9 @@ impl RequestQueue {
         if self.sender.try_send(queued_request).is_err() {
             warn!("Queue is full, rejecting streaming request");
             self.metrics.record_request_failed(); // Adjust queue size back down
-            return Err(QueueError::Full);
+            return Err(QueueError::Full {
+                capacity: self.config.max_queue_size,
+            });
         }
 
         Ok(stream_receiver)
@@ -310,6 +397,18 @@ impl RequestQueue {
                 worker_id, queued_request.id, queue_time
             );
 
+            // Estimate memory usage for this request
+            let session_content_size: usize = queued_request
+                .request
+                .session
+                .messages
+                .iter()
+                .map(|m| m.content.len())
+                .sum();
+            let estimated_memory_bytes = session_content_size as u64
+                + queued_request.request.max_tokens.unwrap_or(512) as u64 * 8; // Estimate token memory
+            metrics.update_memory_usage(estimated_memory_bytes);
+
             // Check if request has already timed out
             if queue_time > config.request_timeout {
                 warn!(
@@ -318,7 +417,9 @@ impl RequestQueue {
                 );
                 let _ = queued_request
                     .response_sender
-                    .send(Err(QueueError::Timeout));
+                    .send(Err(QueueError::Timeout {
+                        duration: queue_time,
+                    }));
                 metrics.record_request_timeout();
                 continue;
             }
@@ -503,9 +604,9 @@ impl RequestQueue {
 
         debug!("Tokenized prompt to {} tokens", tokens_list.len());
 
-        // Create batch for initial prompt processing with optimized size
-        let batch_size = tokens_list.len().clamp(512, 1024);
-        let mut batch = LlamaBatch::new(batch_size, 1);
+        // Create batch for initial prompt processing with optimized size based on available memory and token count
+        let optimal_batch_size = Self::calculate_optimal_batch_size(tokens_list.len(), 512, 2048);
+        let mut batch = LlamaBatch::new(optimal_batch_size, 1);
 
         // Add prompt tokens to batch
         for (i, token) in tokens_list.iter().enumerate() {
@@ -530,14 +631,20 @@ impl RequestQueue {
 
         debug!("Initial prompt processed, starting generation");
 
-        // Create sampler for token generation
+        // Create optimized sampler for token generation
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::dist(1234), // Use fixed seed for deterministic behavior
-            LlamaSampler::greedy(),
+            LlamaSampler::dist(1234),     // Use fixed seed for deterministic behavior
+            LlamaSampler::top_k(40), // Add top-k sampling for better quality/performance balance
+            LlamaSampler::top_p(0.95, 1), // Add nucleus sampling
+            LlamaSampler::min_p(0.05, 1), // Add minimum probability threshold
+            LlamaSampler::temp(0.8), // Add temperature for controlled randomness
+            LlamaSampler::greedy(),  // Final greedy selection
         ]);
 
         let max_tokens = request.max_tokens.unwrap_or(512);
-        let mut generated_text = String::new();
+        // Pre-allocate string with estimated capacity to reduce memory reallocations
+        let estimated_chars = (max_tokens as usize).saturating_mul(4); // ~4 chars per token
+        let mut generated_text = String::with_capacity(estimated_chars.min(8192)); // Cap at 8KB
         let mut finish_reason = FinishReason::MaxTokens;
         let mut tokens_generated = 0u32;
         let mut n_cur = tokens_list.len();
@@ -648,10 +755,13 @@ impl RequestQueue {
 
     fn format_session_prompt(session: &Session) -> Result<String, QueueError> {
         // Pre-calculate capacity to reduce reallocations
-        let estimated_capacity = session.messages.iter()
+        let estimated_capacity = session
+            .messages
+            .iter()
             .map(|m| m.content.len() + 50) // Role prefix + content + buffer
-            .sum::<usize>() + 100; // Additional buffer for "Assistant:" suffix
-        
+            .sum::<usize>()
+            + 100; // Additional buffer for "Assistant:" suffix
+
         let mut prompt = String::with_capacity(estimated_capacity);
 
         for message in &session.messages {
@@ -754,8 +864,8 @@ impl RequestQueue {
         );
 
         // Create and process initial batch with optimized size
-        let batch_size = tokens_list.len().clamp(512, 1024);
-        let mut batch = LlamaBatch::new(batch_size, 1);
+        let optimal_batch_size = Self::calculate_optimal_batch_size(tokens_list.len(), 512, 2048);
+        let mut batch = LlamaBatch::new(optimal_batch_size, 1);
 
         // Add prompt tokens to batch
         for (i, token) in tokens_list.iter().enumerate() {
@@ -782,10 +892,14 @@ impl RequestQueue {
 
         debug!("Initial prompt processed for streaming, starting generation");
 
-        // Create sampler for token generation
+        // Create optimized sampler for token generation (streaming)
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::dist(1234), // Use fixed seed for deterministic behavior
-            LlamaSampler::greedy(),
+            LlamaSampler::dist(1234),     // Use fixed seed for deterministic behavior
+            LlamaSampler::top_k(40), // Add top-k sampling for better quality/performance balance
+            LlamaSampler::top_p(0.95, 1), // Add nucleus sampling
+            LlamaSampler::min_p(0.05, 1), // Add minimum probability threshold
+            LlamaSampler::temp(0.8), // Add temperature for controlled randomness
+            LlamaSampler::greedy(),  // Final greedy selection
         ]);
 
         let max_tokens = request.max_tokens.unwrap_or(512);
@@ -958,31 +1072,97 @@ impl RequestQueue {
 
 impl RequestQueue {
     /// Gracefully shutdown the queue, waiting for all workers to complete
-    pub async fn shutdown(mut self) {
-        info!("RequestQueue shutting down gracefully");
+    pub async fn shutdown(mut self) -> Result<(), QueueError> {
+        info!("🛑 RequestQueue initiating graceful shutdown...");
+        let shutdown_start = std::time::Instant::now();
 
-        // Close the sender to signal workers to shutdown
-        // sender will be dropped automatically when this method ends
+        // Create shutdown timeout to prevent hanging
+        let shutdown_timeout = std::time::Duration::from_secs(30);
 
-        // Wait for all worker handles to complete
-        for handle in self.worker_handles.drain(..) {
-            if let Err(e) = handle.await {
-                warn!("Worker thread panicked during shutdown: {:?}", e);
+        let result = tokio::time::timeout(shutdown_timeout, async move {
+            info!("📤 Closing request channel to stop accepting new requests...");
+
+            // Create a dummy sender and swap it out to effectively close the original sender
+            let (dummy_sender, _) = tokio::sync::mpsc::channel(1);
+            let _ = std::mem::replace(&mut self.sender, dummy_sender);
+
+            info!(
+                "⏳ Waiting for {} worker threads to complete...",
+                self.worker_handles.len()
+            );
+
+            // Wait for all worker handles to complete with individual timeouts
+            let mut completed_workers = 0;
+            for (idx, handle) in self.worker_handles.drain(..).enumerate() {
+                match tokio::time::timeout(std::time::Duration::from_secs(10), handle).await {
+                    Ok(Ok(())) => {
+                        completed_workers += 1;
+                        debug!("✅ Worker {} shutdown completed", idx);
+                    }
+                    Ok(Err(e)) => {
+                        warn!("⚠️  Worker {} panicked during shutdown: {:?}", idx, e);
+                    }
+                    Err(_) => {
+                        warn!("⏰ Worker {} shutdown timed out, forcing termination", idx);
+                    }
+                }
+            }
+
+            let shutdown_duration = shutdown_start.elapsed();
+            info!(
+                "✅ RequestQueue shutdown completed successfully in {:?}",
+                shutdown_duration
+            );
+            info!(
+                "📊 Shutdown summary: {}/{} workers completed gracefully",
+                completed_workers,
+                self.worker_handles.capacity()
+            );
+
+            Ok(())
+        })
+        .await;
+
+        match result {
+            Ok(Ok(())) => {
+                info!("🎉 Graceful shutdown completed successfully");
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                error!("❌ Error during shutdown: {:?}", e);
+                Err(e)
+            }
+            Err(_) => {
+                warn!("⏰ Shutdown timed out after {:?}, some resources may not be cleaned up properly", shutdown_timeout);
+                Err(QueueError::WorkerError(
+                    "Shutdown timeout exceeded".to_string(),
+                ))
             }
         }
-
-        info!("RequestQueue shutdown complete");
     }
 }
 
 impl Drop for RequestQueue {
     fn drop(&mut self) {
-        info!(
-            "RequestQueue dropping - {} worker handles remaining",
-            self.worker_handles.len()
-        );
-        // Note: worker_handles will be aborted when dropped
-        // For graceful shutdown, call shutdown() method instead
+        if !self.worker_handles.is_empty() {
+            warn!(
+                "🚨 RequestQueue being dropped with {} active worker handles - resources may not be cleaned up properly! 
+                \n🔧 For proper cleanup, call shutdown() method before dropping.",
+                self.worker_handles.len()
+            );
+
+            // Force abort remaining handles
+            for handle in self.worker_handles.drain(..) {
+                handle.abort();
+            }
+
+            warn!(
+                "⚡ Aborted {} worker handles during emergency cleanup",
+                self.worker_handles.capacity()
+            );
+        } else {
+            debug!("♻️  RequestQueue dropped cleanly (no active workers)");
+        }
     }
 }
 
@@ -1194,7 +1374,7 @@ mod tests {
             QueueError::WorkerError(msg) => {
                 assert!(msg.contains("Model not loaded") || msg.contains("Model error"));
             }
-            QueueError::Timeout => {
+            QueueError::Timeout { duration: _ } => {
                 // This could also happen if the timeout is very short
             }
             other => panic!("Unexpected error type: {:?}", other),
