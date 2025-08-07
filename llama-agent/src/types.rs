@@ -181,7 +181,7 @@ pub struct StreamChunk {
     pub token_count: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentConfig {
     pub model: ModelConfig,
     pub queue_config: QueueConfig,
@@ -189,14 +189,14 @@ pub struct AgentConfig {
     pub session_config: SessionConfig,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub source: ModelSource,
     pub batch_size: u32,
     pub use_hf_params: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModelSource {
     HuggingFace {
         repo: String,
@@ -208,14 +208,14 @@ pub enum ModelSource {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueConfig {
     pub max_queue_size: usize,
     pub request_timeout: Duration,
     pub worker_threads: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionConfig {
     pub max_sessions: usize,
     pub session_timeout: Duration,
@@ -227,6 +227,242 @@ impl Default for SessionConfig {
             max_sessions: 1000,
             session_timeout: Duration::from_secs(3600), // 1 hour
         }
+    }
+}
+
+impl Default for ModelConfig {
+    fn default() -> Self {
+        Self {
+            source: ModelSource::HuggingFace {
+                repo: "microsoft/DialoGPT-medium".to_string(),
+                filename: None,
+            },
+            batch_size: 512,
+            use_hf_params: true,
+        }
+    }
+}
+
+impl Default for QueueConfig {
+    fn default() -> Self {
+        Self {
+            max_queue_size: 100,
+            request_timeout: Duration::from_secs(30),
+            worker_threads: 1,
+        }
+    }
+}
+
+impl ModelConfig {
+    pub fn validate(&self) -> Result<(), ModelError> {
+        self.source.validate()?;
+
+        if self.batch_size == 0 {
+            return Err(ModelError::InvalidConfig(
+                "Batch size must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.batch_size > 8192 {
+            return Err(ModelError::InvalidConfig(
+                "Batch size should not exceed 8192 for most models".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl ModelSource {
+    pub fn validate(&self) -> Result<(), ModelError> {
+        match self {
+            ModelSource::HuggingFace { repo, filename } => {
+                if repo.is_empty() {
+                    return Err(ModelError::InvalidConfig(
+                        "HuggingFace repo name cannot be empty".to_string(),
+                    ));
+                }
+
+                // Validate repo format (should contain at least one '/')
+                if !repo.contains('/') {
+                    return Err(ModelError::InvalidConfig(
+                        "HuggingFace repo must be in format 'org/repo'".to_string(),
+                    ));
+                }
+
+                // Check for invalid characters
+                if repo
+                    .chars()
+                    .any(|c| !c.is_alphanumeric() && !"-_./".contains(c))
+                {
+                    return Err(ModelError::InvalidConfig(
+                        "Invalid characters in HuggingFace repo name".to_string(),
+                    ));
+                }
+
+                if let Some(f) = filename {
+                    if f.is_empty() {
+                        return Err(ModelError::InvalidConfig(
+                            "Filename cannot be empty".to_string(),
+                        ));
+                    }
+                    if !f.ends_with(".gguf") {
+                        return Err(ModelError::InvalidConfig(
+                            "Model file must have .gguf extension".to_string(),
+                        ));
+                    }
+                }
+
+                Ok(())
+            }
+            ModelSource::Local { folder, filename } => {
+                if !folder.exists() {
+                    return Err(ModelError::NotFound(format!(
+                        "Local folder does not exist: {}",
+                        folder.display()
+                    )));
+                }
+
+                if !folder.is_dir() {
+                    return Err(ModelError::InvalidConfig(format!(
+                        "Path is not a directory: {}",
+                        folder.display()
+                    )));
+                }
+
+                if let Some(f) = filename {
+                    if f.is_empty() {
+                        return Err(ModelError::InvalidConfig(
+                            "Filename cannot be empty".to_string(),
+                        ));
+                    }
+                    if !f.ends_with(".gguf") {
+                        return Err(ModelError::InvalidConfig(
+                            "Model file must have .gguf extension".to_string(),
+                        ));
+                    }
+
+                    let full_path = folder.join(f);
+                    if !full_path.exists() {
+                        return Err(ModelError::NotFound(format!(
+                            "Model file does not exist: {}",
+                            full_path.display()
+                        )));
+                    }
+
+                    if !full_path.is_file() {
+                        return Err(ModelError::InvalidConfig(format!(
+                            "Path is not a file: {}",
+                            full_path.display()
+                        )));
+                    }
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
+impl QueueConfig {
+    pub fn validate(&self) -> Result<(), QueueError> {
+        if self.max_queue_size == 0 {
+            return Err(QueueError::WorkerError(
+                "Queue size must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.worker_threads == 0 {
+            return Err(QueueError::WorkerError(
+                "Worker threads must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.worker_threads > 16 {
+            return Err(QueueError::WorkerError(
+                "Worker threads should not exceed 16 for most systems".to_string(),
+            ));
+        }
+
+        if self.request_timeout.as_secs() == 0 {
+            return Err(QueueError::WorkerError(
+                "Request timeout must be greater than 0 seconds".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl SessionConfig {
+    pub fn validate(&self) -> Result<(), SessionError> {
+        if self.max_sessions == 0 {
+            return Err(SessionError::InvalidState(
+                "Max sessions must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.session_timeout.as_secs() == 0 {
+            return Err(SessionError::InvalidState(
+                "Session timeout must be greater than 0 seconds".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl MCPServerConfig {
+    pub fn validate(&self) -> Result<(), MCPError> {
+        if self.name.is_empty() {
+            return Err(MCPError::Protocol(
+                "MCP server name cannot be empty".to_string(),
+            ));
+        }
+
+        if self.command.is_empty() {
+            return Err(MCPError::Protocol(
+                "MCP server command cannot be empty".to_string(),
+            ));
+        }
+
+        // Check for invalid characters in name
+        if self
+            .name
+            .chars()
+            .any(|c| !c.is_alphanumeric() && !"-_".contains(c))
+        {
+            return Err(MCPError::Protocol(
+                "MCP server name contains invalid characters".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl AgentConfig {
+    pub fn validate(&self) -> Result<(), AgentError> {
+        self.model.validate()?;
+        self.queue_config.validate()?;
+        self.session_config.validate()?;
+
+        for server_config in &self.mcp_servers {
+            server_config.validate()?;
+        }
+
+        // Check for duplicate MCP server names
+        let mut server_names = std::collections::HashSet::new();
+        for server_config in &self.mcp_servers {
+            if !server_names.insert(&server_config.name) {
+                return Err(AgentError::MCP(MCPError::Protocol(format!(
+                    "Duplicate MCP server name: {}",
+                    server_config.name
+                ))));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -609,5 +845,318 @@ mod tests {
         let serialized = serde_json::to_string(&result).unwrap();
         let deserialized: ToolResult = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.call_id, call_id);
+    }
+
+    #[test]
+    fn test_config_defaults() {
+        let model_config = ModelConfig::default();
+        match model_config.source {
+            ModelSource::HuggingFace { ref repo, .. } => {
+                assert_eq!(repo, "microsoft/DialoGPT-medium")
+            }
+            _ => panic!("Wrong default model source"),
+        }
+        assert_eq!(model_config.batch_size, 512);
+        assert!(model_config.use_hf_params);
+
+        let queue_config = QueueConfig::default();
+        assert_eq!(queue_config.max_queue_size, 100);
+        assert_eq!(queue_config.request_timeout, Duration::from_secs(30));
+        assert_eq!(queue_config.worker_threads, 1);
+
+        let session_config = SessionConfig::default();
+        assert_eq!(session_config.max_sessions, 1000);
+        assert_eq!(session_config.session_timeout, Duration::from_secs(3600));
+
+        let agent_config = AgentConfig::default();
+        assert!(agent_config.mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let config = AgentConfig::default();
+
+        let serialized = serde_json::to_string(&config).unwrap();
+        let deserialized: AgentConfig = serde_json::from_str(&serialized).unwrap();
+
+        // Compare key fields
+        assert_eq!(
+            deserialized.queue_config.max_queue_size,
+            config.queue_config.max_queue_size
+        );
+        assert_eq!(
+            deserialized.session_config.max_sessions,
+            config.session_config.max_sessions
+        );
+        assert_eq!(deserialized.model.batch_size, config.model.batch_size);
+    }
+
+    #[test]
+    fn test_model_config_validation_valid() {
+        let config = ModelConfig {
+            source: ModelSource::HuggingFace {
+                repo: "microsoft/DialoGPT-medium".to_string(),
+                filename: Some("model.gguf".to_string()),
+            },
+            batch_size: 512,
+            use_hf_params: true,
+        };
+
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_model_config_validation_invalid_batch_size() {
+        let config = ModelConfig {
+            source: ModelSource::HuggingFace {
+                repo: "microsoft/DialoGPT-medium".to_string(),
+                filename: None,
+            },
+            batch_size: 0,
+            use_hf_params: true,
+        };
+
+        assert!(config.validate().is_err());
+
+        let config = ModelConfig {
+            source: ModelSource::HuggingFace {
+                repo: "microsoft/DialoGPT-medium".to_string(),
+                filename: None,
+            },
+            batch_size: 10000,
+            use_hf_params: true,
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_model_source_validation_huggingface() {
+        // Valid HuggingFace repo
+        let source = ModelSource::HuggingFace {
+            repo: "microsoft/DialoGPT-medium".to_string(),
+            filename: Some("model.gguf".to_string()),
+        };
+        assert!(source.validate().is_ok());
+
+        // Empty repo
+        let source = ModelSource::HuggingFace {
+            repo: "".to_string(),
+            filename: None,
+        };
+        assert!(source.validate().is_err());
+
+        // Invalid repo format (no slash)
+        let source = ModelSource::HuggingFace {
+            repo: "invalid-repo".to_string(),
+            filename: None,
+        };
+        assert!(source.validate().is_err());
+
+        // Invalid filename extension
+        let source = ModelSource::HuggingFace {
+            repo: "microsoft/DialoGPT-medium".to_string(),
+            filename: Some("model.txt".to_string()),
+        };
+        assert!(source.validate().is_err());
+
+        // Empty filename
+        let source = ModelSource::HuggingFace {
+            repo: "microsoft/DialoGPT-medium".to_string(),
+            filename: Some("".to_string()),
+        };
+        assert!(source.validate().is_err());
+    }
+
+    #[test]
+    fn test_model_source_validation_local() {
+        // Test with actual temp directory
+        let temp_dir = std::env::temp_dir();
+
+        // Valid local source with existing directory
+        let source = ModelSource::Local {
+            folder: temp_dir.clone(),
+            filename: None,
+        };
+        assert!(source.validate().is_ok());
+
+        // Non-existent directory
+        let source = ModelSource::Local {
+            folder: PathBuf::from("/non/existent/path"),
+            filename: None,
+        };
+        assert!(source.validate().is_err());
+
+        // Empty filename
+        let source = ModelSource::Local {
+            folder: temp_dir,
+            filename: Some("".to_string()),
+        };
+        assert!(source.validate().is_err());
+    }
+
+    #[test]
+    fn test_queue_config_validation() {
+        // Valid config
+        let config = QueueConfig {
+            max_queue_size: 100,
+            request_timeout: Duration::from_secs(30),
+            worker_threads: 2,
+        };
+        assert!(config.validate().is_ok());
+
+        // Invalid queue size
+        let config = QueueConfig {
+            max_queue_size: 0,
+            request_timeout: Duration::from_secs(30),
+            worker_threads: 1,
+        };
+        assert!(config.validate().is_err());
+
+        // Invalid worker threads
+        let config = QueueConfig {
+            max_queue_size: 100,
+            request_timeout: Duration::from_secs(30),
+            worker_threads: 0,
+        };
+        assert!(config.validate().is_err());
+
+        // Too many worker threads
+        let config = QueueConfig {
+            max_queue_size: 100,
+            request_timeout: Duration::from_secs(30),
+            worker_threads: 20,
+        };
+        assert!(config.validate().is_err());
+
+        // Invalid timeout
+        let config = QueueConfig {
+            max_queue_size: 100,
+            request_timeout: Duration::from_secs(0),
+            worker_threads: 1,
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_session_config_validation() {
+        // Valid config
+        let config = SessionConfig {
+            max_sessions: 1000,
+            session_timeout: Duration::from_secs(3600),
+        };
+        assert!(config.validate().is_ok());
+
+        // Invalid max sessions
+        let config = SessionConfig {
+            max_sessions: 0,
+            session_timeout: Duration::from_secs(3600),
+        };
+        assert!(config.validate().is_err());
+
+        // Invalid timeout
+        let config = SessionConfig {
+            max_sessions: 1000,
+            session_timeout: Duration::from_secs(0),
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_mcp_server_config_validation() {
+        // Valid config
+        let config = MCPServerConfig {
+            name: "filesystem".to_string(),
+            command: "npx".to_string(),
+            args: vec!["-y".to_string()],
+        };
+        assert!(config.validate().is_ok());
+
+        // Empty name
+        let config = MCPServerConfig {
+            name: "".to_string(),
+            command: "npx".to_string(),
+            args: vec![],
+        };
+        assert!(config.validate().is_err());
+
+        // Empty command
+        let config = MCPServerConfig {
+            name: "filesystem".to_string(),
+            command: "".to_string(),
+            args: vec![],
+        };
+        assert!(config.validate().is_err());
+
+        // Invalid characters in name
+        let config = MCPServerConfig {
+            name: "file@system".to_string(),
+            command: "npx".to_string(),
+            args: vec![],
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_agent_config_validation() {
+        // Valid config
+        let config = AgentConfig::default();
+        assert!(config.validate().is_ok());
+
+        // Config with duplicate MCP server names
+        let mut config = AgentConfig::default();
+        config.mcp_servers = vec![
+            MCPServerConfig {
+                name: "filesystem".to_string(),
+                command: "npx".to_string(),
+                args: vec![],
+            },
+            MCPServerConfig {
+                name: "filesystem".to_string(),
+                command: "another".to_string(),
+                args: vec![],
+            },
+        ];
+        assert!(config.validate().is_err());
+
+        // Config with invalid model
+        let mut config = AgentConfig::default();
+        config.model.batch_size = 0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_model_source_serialization() {
+        let hf_source = ModelSource::HuggingFace {
+            repo: "microsoft/DialoGPT-medium".to_string(),
+            filename: Some("model.gguf".to_string()),
+        };
+
+        let serialized = serde_json::to_string(&hf_source).unwrap();
+        let deserialized: ModelSource = serde_json::from_str(&serialized).unwrap();
+
+        match deserialized {
+            ModelSource::HuggingFace { repo, filename } => {
+                assert_eq!(repo, "microsoft/DialoGPT-medium");
+                assert_eq!(filename, Some("model.gguf".to_string()));
+            }
+            _ => panic!("Wrong variant after deserialization"),
+        }
+
+        let local_source = ModelSource::Local {
+            folder: PathBuf::from("/tmp/models"),
+            filename: None,
+        };
+
+        let serialized = serde_json::to_string(&local_source).unwrap();
+        let deserialized: ModelSource = serde_json::from_str(&serialized).unwrap();
+
+        match deserialized {
+            ModelSource::Local { folder, filename } => {
+                assert_eq!(folder, PathBuf::from("/tmp/models"));
+                assert_eq!(filename, None);
+            }
+            _ => panic!("Wrong variant after deserialization"),
+        }
     }
 }
