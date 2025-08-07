@@ -32,6 +32,14 @@ struct Args {
     /// Stop generation after this many tokens even without proper stop token
     #[arg(long, default_value = "512")]
     limit: u32,
+
+    /// Batch size for model processing
+    #[arg(long, default_value = "512")]
+    batch_size: u32,
+
+    /// Number of worker threads for queue processing
+    #[arg(long, default_value = "2")]
+    worker_threads: usize,
 }
 
 #[tokio::main]
@@ -69,7 +77,7 @@ async fn run_agent(args: Args) -> Result<String> {
                 folder: PathBuf::from(&args.model),
                 filename: args.filename,
             },
-            batch_size: 512,
+            batch_size: args.batch_size,
             use_hf_params: false,
         }
     } else {
@@ -79,7 +87,7 @@ async fn run_agent(args: Args) -> Result<String> {
                 repo: args.model.clone(),
                 filename: args.filename,
             },
-            batch_size: 512,
+            batch_size: args.batch_size,
             use_hf_params: true,
         }
     };
@@ -88,7 +96,7 @@ async fn run_agent(args: Args) -> Result<String> {
     let queue_config = QueueConfig {
         max_queue_size: 10,
         request_timeout: Duration::from_secs(30),
-        worker_threads: 2,
+        worker_threads: args.worker_threads,
     };
 
     let session_config = SessionConfig {

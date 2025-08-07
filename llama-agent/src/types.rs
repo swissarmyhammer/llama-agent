@@ -1104,19 +1104,21 @@ mod tests {
         assert!(config.validate().is_ok());
 
         // Config with duplicate MCP server names
-        let mut config = AgentConfig::default();
-        config.mcp_servers = vec![
-            MCPServerConfig {
-                name: "filesystem".to_string(),
-                command: "npx".to_string(),
-                args: vec![],
-            },
-            MCPServerConfig {
-                name: "filesystem".to_string(),
-                command: "another".to_string(),
-                args: vec![],
-            },
-        ];
+        let config = AgentConfig {
+            mcp_servers: vec![
+                MCPServerConfig {
+                    name: "filesystem".to_string(),
+                    command: "npx".to_string(),
+                    args: vec![],
+                },
+                MCPServerConfig {
+                    name: "filesystem".to_string(),
+                    command: "another".to_string(),
+                    args: vec![],
+                },
+            ],
+            ..Default::default()
+        };
         assert!(config.validate().is_err());
 
         // Config with invalid model
