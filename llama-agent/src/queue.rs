@@ -48,6 +48,7 @@ pub struct QueueMetrics {
     pub timeout_requests: AtomicU64,
     pub cancelled_requests: AtomicU64,
     pub current_queue_size: AtomicUsize,
+    pub peak_queue_size: AtomicUsize,
     pub total_processing_time_ms: AtomicU64,
     pub total_tokens_generated: AtomicU64,
     pub peak_memory_usage_bytes: AtomicU64,
@@ -63,6 +64,7 @@ impl QueueMetrics {
             timeout_requests: AtomicU64::new(0),
             cancelled_requests: AtomicU64::new(0),
             current_queue_size: AtomicUsize::new(0),
+            peak_queue_size: AtomicUsize::new(0),
             total_processing_time_ms: AtomicU64::new(0),
             total_tokens_generated: AtomicU64::new(0),
             peak_memory_usage_bytes: AtomicU64::new(0),
@@ -72,7 +74,21 @@ impl QueueMetrics {
 
     pub fn record_request_submitted(&self) {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
-        self.current_queue_size.fetch_add(1, Ordering::Relaxed);
+        let current_size = self.current_queue_size.fetch_add(1, Ordering::Relaxed) + 1;
+
+        // Update peak queue size atomically
+        let mut peak = self.peak_queue_size.load(Ordering::Relaxed);
+        while current_size > peak {
+            match self.peak_queue_size.compare_exchange_weak(
+                peak,
+                current_size,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(new_peak) => peak = new_peak,
+            }
+        }
     }
 
     pub fn record_request_completed(&self, processing_time: Duration, tokens_generated: u32) {
@@ -130,23 +146,34 @@ impl QueueMetrics {
     }
 
     pub fn get_stats(&self) -> QueueStats {
+        let total_time_ms = self.total_processing_time_ms.load(Ordering::Relaxed);
+        let completed = self.completed_requests.load(Ordering::Relaxed);
+        let total_tokens = self.total_tokens_generated.load(Ordering::Relaxed);
+
         QueueStats {
             total_requests: self.total_requests.load(Ordering::Relaxed),
-            completed_requests: self.completed_requests.load(Ordering::Relaxed),
+            completed_requests: completed,
             failed_requests: self.failed_requests.load(Ordering::Relaxed),
             timeout_requests: self.timeout_requests.load(Ordering::Relaxed),
             cancelled_requests: self.cancelled_requests.load(Ordering::Relaxed),
             current_queue_size: self.current_queue_size.load(Ordering::Relaxed),
+            peak_queue_size: self.peak_queue_size.load(Ordering::Relaxed),
             average_processing_time_ms: {
-                let total_time = self.total_processing_time_ms.load(Ordering::Relaxed);
-                let completed = self.completed_requests.load(Ordering::Relaxed);
                 if completed > 0 {
-                    total_time / completed
+                    total_time_ms / completed
                 } else {
                     0
                 }
             },
-            total_tokens_generated: self.total_tokens_generated.load(Ordering::Relaxed),
+            total_tokens_generated: total_tokens,
+            throughput_tokens_per_second: {
+                if total_time_ms > 0 && total_tokens > 0 {
+                    // Calculate tokens per second: (total_tokens * 1000) / total_time_ms
+                    (total_tokens * 1000) / total_time_ms
+                } else {
+                    0
+                }
+            },
             current_memory_usage_bytes: self.current_memory_usage_bytes.load(Ordering::Relaxed),
             peak_memory_usage_bytes: self.peak_memory_usage_bytes.load(Ordering::Relaxed),
         }
@@ -161,8 +188,10 @@ pub struct QueueStats {
     pub timeout_requests: u64,
     pub cancelled_requests: u64,
     pub current_queue_size: usize,
+    pub peak_queue_size: usize,
     pub average_processing_time_ms: u64,
     pub total_tokens_generated: u64,
+    pub throughput_tokens_per_second: u64,
     pub current_memory_usage_bytes: u64,
     pub peak_memory_usage_bytes: u64,
 }
@@ -197,7 +226,7 @@ impl RequestQueue {
         let base_size = (token_count / 4).clamp(min_batch, max_batch);
 
         // Adjust based on available CPU cores for better parallelization
-        let cpu_factor = (num_cpus::get() / 2).max(1).min(4);
+        let cpu_factor = (num_cpus::get() / 2).clamp(1, 4);
         let optimized_size = base_size * cpu_factor;
 
         // Ensure we stay within reasonable bounds for memory usage
@@ -211,10 +240,10 @@ impl RequestQueue {
         // For inference workloads, we don't need as many workers as CPUs
         // since most work is done by the ML model which has its own threading
         let optimal_count = match cpu_count {
-            1..=2 => 1,                         // Single worker for low-core systems
-            3..=4 => 2,                         // Dual workers for mid-range systems
-            5..=8 => cpu_count / 2,             // Half the cores for reasonable systems
-            _ => (cpu_count / 3).max(4).min(8), // Cap at 8 workers for high-core systems
+            1..=2 => 1,                       // Single worker for low-core systems
+            3..=4 => 2,                       // Dual workers for mid-range systems
+            5..=8 => cpu_count / 2,           // Half the cores for reasonable systems
+            _ => (cpu_count / 3).clamp(4, 8), // Cap at 8 workers for high-core systems
         };
 
         // Respect user configuration but provide optimization
@@ -327,8 +356,8 @@ impl RequestQueue {
         let (response_sender, _) = oneshot::channel();
         // Use optimized buffer size for streaming to prevent backpressure while managing memory
         let base_buffer = request.max_tokens.unwrap_or(512) as usize;
-        let cpu_factor = (num_cpus::get() / 2).max(1).min(4);
-        let buffer_size = (base_buffer / 4).max(50).min(1000) * cpu_factor;
+        let cpu_factor = (num_cpus::get() / 2).clamp(1, 4);
+        let buffer_size = (base_buffer / 4).clamp(50, 1000) * cpu_factor;
         let (stream_sender, stream_receiver) = mpsc::channel(buffer_size);
 
         let queued_request = QueuedRequest {

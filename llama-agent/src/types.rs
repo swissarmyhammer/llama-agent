@@ -135,7 +135,7 @@ pub struct ToolDefinition {
     pub server_name: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct GenerationRequest {
     pub session: Session,
     pub max_tokens: Option<u32>,
@@ -503,70 +503,70 @@ pub enum AgentError {
 
 #[derive(Debug, Error)]
 pub enum ModelError {
-    #[error("Failed to load model: {0}. \n\nTroubleshooting steps:\n• Verify model format is .gguf (GGML Unified Format)\n• Check available system memory (models require 4-16GB typically)\n• Ensure model file is not corrupted (re-download if needed)\n• Try reducing batch size or context length in configuration")]
+    #[error("Failed to load model: {0}\n\n💡 Troubleshooting steps:\n• Verify model format is .gguf (GGML Unified Format)\n• Check available system memory (models require 4-16GB typically)\n• Ensure model file is not corrupted (re-download if needed)\n• Try reducing batch_size to 512 or lower in configuration\n• Check disk space is sufficient for model loading")]
     LoadingFailed(String),
 
-    #[error("Model not found: {0}. \n\nPlease check:\n• Model file path exists and is readable\n• Filename matches exactly (case-sensitive)\n• File permissions allow read access\n• For HuggingFace repos: verify repo name and model file exists")]
+    #[error("Model not found: {0}\n\n💡 Please check:\n• Model file path exists and is readable\n• Filename matches exactly (case-sensitive)\n• File permissions allow read access (chmod 644)\n• For HuggingFace repos: verify repo name exists and model file is present\n• Use absolute paths to avoid relative path issues")]
     NotFound(String),
 
-    #[error("Invalid model configuration: {0}. \n\nConfiguration requirements:\n• batch_size must be > 0 (recommended: 512-2048)\n• Model path must be absolute or relative to current directory\n• File extension must be .gguf\n• HuggingFace repo format: 'username/repo-name'")]
+    #[error("Invalid model configuration: {0}\n\n💡 Configuration requirements:\n• batch_size must be > 0 (recommended: 512-2048)\n• Model path must be absolute or relative to current directory\n• File extension must be .gguf\n• HuggingFace repo format: 'username/repo-name'\n• Ensure numeric values are within valid ranges")]
     InvalidConfig(String),
 
-    #[error("Model inference failed: {0}. \n\nPossible causes:\n• Insufficient system memory or GPU memory\n• Model format incompatible with current version\n• Context length exceeds model's maximum\n• Hardware acceleration (Metal/CUDA) unavailable")]
+    #[error("Model inference failed: {0}\n\n💡 Possible causes:\n• Insufficient system memory or GPU memory\n• Model format incompatible with current version\n• Context length exceeds model's maximum (try reducing max_tokens)\n• Hardware acceleration (Metal/CUDA) unavailable\n• Concurrent requests exceeding system capacity")]
     InferenceFailed(String),
 }
 
 #[derive(Debug, Clone, Error)]
 pub enum QueueError {
-    #[error("Request queue is full (all {capacity} slots occupied). \n\nOptions:\n• Wait a few seconds and retry\n• Increase max_queue_size in configuration\n• Reduce concurrent request load\n• Check if requests are processing normally (use health check)")]
+    #[error("Request queue is full (all {capacity} slots occupied)\n\n💡 Options to resolve:\n• Wait a few seconds and retry your request\n• Increase max_queue_size in configuration (current: {capacity})\n• Reduce concurrent request load from clients\n• Check if requests are processing normally (monitor queue metrics)\n• Consider scaling to multiple workers")]
     Full { capacity: usize },
 
-    #[error("Request timeout after {duration:?}. \n\nSuggestions:\n• Reduce max_tokens in the request\n• Simplify the prompt or conversation context\n• Increase request_timeout in queue configuration\n• Check system resources (CPU/memory usage)")]
+    #[error("Request timeout after {duration:?}\n\n💡 Suggestions to resolve:\n• Reduce max_tokens in the request (try < 1000)\n• Simplify the prompt or conversation context\n• Increase request_timeout in queue configuration\n• Check system resources (CPU/memory usage)\n• Monitor for memory leaks or resource exhaustion")]
     Timeout { duration: Duration },
 
-    #[error("Processing error: {0}. \n\nDebugging steps:\n• Check detailed logs for stack trace\n• Verify model is properly loaded and accessible\n• Ensure sufficient system resources\n• Try with a simpler request to isolate the issue")]
+    #[error("Processing error: {0}\n\n💡 Debugging steps:\n• Check detailed logs for complete stack trace\n• Verify model is properly loaded and accessible\n• Ensure sufficient system resources (memory, CPU)\n• Try with a simpler request to isolate the issue\n• Restart the service if errors persist")]
     WorkerError(String),
 }
 
 #[derive(Debug, Error)]
 pub enum SessionError {
-    #[error("Session not found: {0}. The session may have expired or been removed. Create a new session to continue.")]
+    #[error("Session not found: {0}\n\n💡 The session may have expired or been removed. Create a new session to continue.")]
     NotFound(String),
 
-    #[error("Session limit exceeded. Close unused sessions or increase the maximum session limit in configuration.")]
+    #[error("Session limit exceeded\n\n💡 Resolution options:\n• Close unused sessions before creating new ones\n• Increase maximum session limit in configuration\n• Implement session cleanup for inactive sessions\n• Check for session leaks in your application")]
     LimitExceeded,
 
-    #[error("Session timed out due to inactivity. Create a new session to continue.")]
+    #[error("Session timed out due to inactivity\n\n💡 Create a new session to continue, or increase session timeout in configuration.")]
     Timeout,
 
-    #[error("Invalid session state: {0}. This may indicate corrupted session data.")]
+    #[error("Invalid session state: {0}\n\n💡 This may indicate corrupted session data. Try creating a fresh session.")]
     InvalidState(String),
 }
 
 #[derive(Debug, Error)]
 pub enum MCPError {
-    #[error("MCP server '{0}' not found. Check server configuration and ensure it's properly initialized.")]
+    #[error("MCP server '{0}' not found\n\n💡 Check server configuration:\n• Ensure server is properly initialized in config\n• Verify server process is running and accessible\n• Check network connectivity if using remote server\n• Validate server name matches configuration exactly")]
     ServerNotFound(String),
 
-    #[error("Tool execution failed: {0}. Verify tool arguments and ensure the MCP server is running properly.")]
+    #[error("Tool execution failed: {0}\n\n💡 Troubleshooting steps:\n• Verify tool arguments match expected schema\n• Ensure the MCP server is running and responsive\n• Check tool permissions and access rights\n• Review server logs for detailed error information\n• Test with simpler tool calls to isolate the issue")]
     ToolCallFailed(String),
 
-    #[error("MCP server connection error: {0}. Check server status and network connectivity.")]
+    #[error("MCP server connection error: {0}\n\n💡 Check server status:\n• Verify server process is running\n• Check network connectivity and firewall settings\n• Ensure server is listening on correct port\n• Try restarting the MCP server")]
     Connection(String),
 
-    #[error("MCP protocol error: {0}. This may indicate incompatible server version or malformed request.")]
+    #[error("MCP protocol error: {0}\n\n💡 This may indicate:\n• Incompatible MCP server version\n• Malformed request or response format\n• Server implementation issues\n• Network data corruption during transmission")]
     Protocol(String),
 }
 
 #[derive(Debug, Error)]
 pub enum TemplateError {
-    #[error("Template rendering failed: {0}. Check template syntax and provided variables.")]
+    #[error("Template rendering failed: {0}\n\n💡 Check template issues:\n• Verify template syntax is valid\n• Ensure all required variables are provided\n• Check for missing or incorrect variable names\n• Review template logic for edge cases")]
     RenderingFailed(String),
 
-    #[error("Failed to parse tool calls: {0}. Check the format of tool call requests in the generated text.")]
+    #[error("Failed to parse tool calls: {0}\n\n💡 Tool call format issues:\n• Check JSON syntax in tool call requests\n• Verify function names match available tools\n• Ensure argument types match expected schema\n• Review generated text for malformed tool calls")]
     ToolCallParsing(String),
 
-    #[error("Invalid template format: {0}. Verify template syntax is correct.")]
+    #[error("Invalid template format: {0}\n\n💡 Template syntax problems:\n• Verify template uses correct syntax\n• Check for unmatched brackets or quotes\n• Ensure proper variable substitution format\n• Test template with minimal data first")]
     Invalid(String),
 }
 
