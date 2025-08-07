@@ -122,6 +122,7 @@ pub struct RequestQueue {
     worker_handles: Vec<JoinHandle<()>>,
     config: QueueConfig,
     metrics: Arc<QueueMetrics>,
+    #[allow(dead_code)]
     chat_template: Arc<ChatTemplateEngine>,
 }
 
@@ -143,7 +144,15 @@ impl RequestQueue {
             let chat_template = chat_template.clone();
 
             let handle = tokio::spawn(async move {
-                Self::worker_loop(worker_id, receiver, model_manager, config, metrics, chat_template).await;
+                Self::worker_loop(
+                    worker_id,
+                    receiver,
+                    model_manager,
+                    config,
+                    metrics,
+                    chat_template,
+                )
+                .await;
             });
 
             worker_handles.push(handle);
@@ -565,19 +574,25 @@ impl RequestQueue {
         }
 
         // Check if the generated text contains tool calls
-        let final_finish_reason = if finish_reason == FinishReason::EndOfSequence 
+        let final_finish_reason = if finish_reason == FinishReason::EndOfSequence
             || finish_reason == FinishReason::StopToken
-            || finish_reason == FinishReason::MaxTokens {
+            || finish_reason == FinishReason::MaxTokens
+        {
             match chat_template.extract_tool_calls(&generated_text) {
                 Ok(tool_calls) if !tool_calls.is_empty() => {
                     debug!(
                         "Worker {} detected {} tool calls in generated text for request {}",
-                        worker_id, tool_calls.len(), request_id
+                        worker_id,
+                        tool_calls.len(),
+                        request_id
                     );
                     FinishReason::ToolCall
                 }
                 Ok(_) => {
-                    debug!("Worker {} no tool calls detected in generated text for request {}", worker_id, request_id);
+                    debug!(
+                        "Worker {} no tool calls detected in generated text for request {}",
+                        worker_id, request_id
+                    );
                     finish_reason
                 }
                 Err(e) => {
@@ -852,12 +867,17 @@ impl RequestQueue {
             Ok(tool_calls) if !tool_calls.is_empty() => {
                 debug!(
                     "Worker {} detected {} tool calls in streaming output for request {}",
-                    worker_id, tool_calls.len(), request_id
+                    worker_id,
+                    tool_calls.len(),
+                    request_id
                 );
                 true
             }
             Ok(_) => {
-                debug!("Worker {} no tool calls detected in streaming output for request {}", worker_id, request_id);
+                debug!(
+                    "Worker {} no tool calls detected in streaming output for request {}",
+                    worker_id, request_id
+                );
                 false
             }
             Err(e) => {
@@ -879,7 +899,11 @@ impl RequestQueue {
         let _ = stream_sender.try_send(Ok(final_chunk));
 
         let generation_time = start_time.elapsed();
-        let reason_suffix = if has_tool_calls { " (with tool calls)" } else { "" };
+        let reason_suffix = if has_tool_calls {
+            " (with tool calls)"
+        } else {
+            ""
+        };
         debug!(
             "Worker {} completed streaming inference for request {} in {:?} ({} tokens, reason: {}{})",
             worker_id, request_id, generation_time, tokens_generated, base_reason, reason_suffix

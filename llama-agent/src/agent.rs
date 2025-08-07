@@ -99,7 +99,7 @@ impl AgentServer {
         // - JSON Schema validation against tool_def.parameters
         // - Type checking for required fields
         // - Range validation for numeric parameters
-        
+
         debug!(
             "Tool arguments validation passed for '{}' (basic validation only)",
             tool_call.name
@@ -111,7 +111,7 @@ impl AgentServer {
     fn should_execute_in_parallel(&self, tool_calls: &[ToolCall]) -> bool {
         // Simple heuristic: execute in parallel if there are multiple calls
         // and they don't appear to be interdependent
-        
+
         // For now, enable parallel execution for most cases
         // TODO: Add more sophisticated dependency analysis
         if tool_calls.len() <= 1 {
@@ -124,9 +124,7 @@ impl AgentServer {
         for tool_call in tool_calls {
             // If we have duplicate tool names, they might be interdependent
             if !tool_names.insert(&tool_call.name) {
-                debug!(
-                    "Detected duplicate tool names, using sequential execution for safety"
-                );
+                debug!("Detected duplicate tool names, using sequential execution for safety");
                 return false;
             }
         }
@@ -142,12 +140,12 @@ impl AgentServer {
         session: &Session,
     ) -> Vec<ToolResult> {
         use futures::future::join_all;
-        
+
         let futures = tool_calls.into_iter().map(|tool_call| {
             let session = session.clone();
             async move {
                 debug!("Starting parallel execution of tool: {}", tool_call.name);
-                
+
                 match self.execute_tool(tool_call.clone(), &session).await {
                     Ok(result) => {
                         debug!("Parallel tool call '{}' completed", tool_call.name);
@@ -166,7 +164,10 @@ impl AgentServer {
         });
 
         let results = join_all(futures).await;
-        debug!("Parallel tool execution completed with {} results", results.len());
+        debug!(
+            "Parallel tool execution completed with {} results",
+            results.len()
+        );
         results
     }
 
@@ -197,12 +198,13 @@ impl AgentServer {
         let mut failed_calls = 0;
 
         // Check if we should execute tools in parallel or sequentially
-        let parallel_execution = tool_calls.len() > 1 && self.should_execute_in_parallel(&tool_calls);
-        
+        let parallel_execution =
+            tool_calls.len() > 1 && self.should_execute_in_parallel(&tool_calls);
+
         if parallel_execution {
             debug!("Executing {} tool calls in parallel", tool_calls.len());
             results = self.execute_tools_parallel(tool_calls, session).await;
-            
+
             // Count results for logging
             for result in &results {
                 if result.error.is_some() {
@@ -213,7 +215,7 @@ impl AgentServer {
             }
         } else {
             debug!("Executing {} tool calls sequentially", tool_calls.len());
-            
+
             // Process each tool call sequentially
             for (i, tool_call) in tool_calls.into_iter().enumerate() {
                 debug!(
@@ -239,8 +241,11 @@ impl AgentServer {
                     Err(e) => {
                         // This should rarely happen since execute_tool now handles errors internally
                         failed_calls += 1;
-                        error!("Unexpected error executing tool call '{}': {}", tool_call.name, e);
-                        
+                        error!(
+                            "Unexpected error executing tool call '{}': {}",
+                            tool_call.name, e
+                        );
+
                         // Create error result to maintain call order and IDs
                         let error_result = ToolResult {
                             call_id: tool_call.id,
@@ -255,7 +260,9 @@ impl AgentServer {
 
         info!(
             "Tool call processing completed: {} successful, {} failed, {} total",
-            successful_calls, failed_calls, results.len()
+            successful_calls,
+            failed_calls,
+            results.len()
         );
 
         Ok(results)
@@ -357,7 +364,7 @@ impl AgentAPI for AgentServer {
 
             // Submit to request queue
             let response = self.request_queue.submit_request(current_request).await?;
-            
+
             accumulated_response.push_str(&response.generated_text);
             total_tokens += response.tokens_generated;
 
@@ -369,7 +376,7 @@ impl AgentAPI for AgentServer {
             // Check if response contains tool calls
             if response.finish_reason == crate::types::FinishReason::ToolCall {
                 debug!("Response contains tool calls, processing...");
-                
+
                 // Process tool calls
                 let tool_results = self
                     .process_tool_calls(&response.generated_text, &working_session)
@@ -536,7 +543,9 @@ impl AgentAPI for AgentServer {
                 let error_msg = format!(
                     "Tool '{}' not found in available tools. Available tools: {}",
                     tool_call.name,
-                    session.available_tools.iter()
+                    session
+                        .available_tools
+                        .iter()
                         .map(|t| t.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", ")
@@ -581,7 +590,7 @@ impl AgentAPI for AgentServer {
             Err(mcp_error) => {
                 let error_msg = format!("Tool execution failed: {}", mcp_error);
                 error!("Tool call '{}' failed: {}", tool_call.name, error_msg);
-                
+
                 // Return ToolResult with error instead of propagating the error
                 // This allows the workflow to continue with partial failures
                 Ok(ToolResult {

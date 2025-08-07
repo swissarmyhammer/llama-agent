@@ -1,6 +1,6 @@
 use llama_agent::{
-    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, QueueConfig,
-    Session, SessionConfig, SessionId, ToolCall, ToolCallId, ToolDefinition, ToolResult,
+    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, QueueConfig, Session,
+    SessionConfig, SessionId, ToolCall, ToolCallId, ToolDefinition, ToolResult,
 };
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -113,7 +113,6 @@ impl TestHelper {
         }
     }
 
-
     /// Create a temporary directory for test files
     pub fn temp_dir() -> TempDir {
         tempfile::tempdir().expect("Failed to create temp directory")
@@ -126,11 +125,10 @@ impl TestHelper {
         model_path
     }
 
-
     /// Create a test configuration with local model
     pub fn config_with_local_model(temp_dir: &TempDir, filename: &str) -> AgentConfig {
         let _model_path = Self::create_test_model_file(temp_dir, filename);
-        
+
         AgentConfig {
             model: ModelConfig {
                 source: ModelSource::Local {
@@ -152,8 +150,4 @@ impl TestHelper {
             },
         }
     }
-
 }
-
-
-
