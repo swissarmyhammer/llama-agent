@@ -53,11 +53,44 @@ edition = "2021"
 
 [dependencies]
 llama-agent = { path = "llama-agent" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 proptest = { workspace = true }
 mockall = { workspace = true }
-tokio = { workspace = true }
-serde_json = { workspace = true }
 ulid = { workspace = true }
+
+# Examples
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
+
+[[example]]
+name = "tool_workflow"
+path = "examples/tool_workflow.rs"
+
+[[example]]
+name = "streaming"
+path = "examples/streaming.rs"
+
+[[example]]
+name = "mcp_integration"
+path = "examples/mcp_integration.rs"
+
+[[example]]
+name = "error_handling"
+path = "examples/error_handling.rs"
+
+[[example]]
+name = "performance_examples"
+path = "examples/performance_examples.rs"
+
+[[example]]
+name = "integration_tests"
+path = "examples/integration_tests.rs"
