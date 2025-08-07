@@ -5,12 +5,95 @@ use thiserror::Error;
 use async_trait::async_trait;
 use futures::Stream;
 use std::pin::Pin;
+use ulid::Ulid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SessionId(Ulid);
+
+impl SessionId {
+    pub fn new() -> Self {
+        Self(Ulid::new())
+    }
+    
+    pub fn from_ulid(ulid: Ulid) -> Self {
+        Self(ulid)
+    }
+    
+    pub fn as_ulid(&self) -> Ulid {
+        self.0
+    }
+    
+    pub fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for SessionId {
+    type Err = ulid::DecodeError;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Ulid::from_string(s)?))
+    }
+}
+
+impl Default for SessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ToolCallId(Ulid);
+
+impl ToolCallId {
+    pub fn new() -> Self {
+        Self(Ulid::new())
+    }
+    
+    pub fn from_ulid(ulid: Ulid) -> Self {
+        Self(ulid)
+    }
+    
+    pub fn as_ulid(&self) -> Ulid {
+        self.0
+    }
+    
+    pub fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl std::fmt::Display for ToolCallId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for ToolCallId {
+    type Err = ulid::DecodeError;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Ulid::from_string(s)?))
+    }
+}
+
+impl Default for ToolCallId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: MessageRole,
     pub content: String,
-    pub tool_call_id: Option<String>,
+    pub tool_call_id: Option<ToolCallId>,
     pub tool_name: Option<String>,
     pub timestamp: SystemTime,
 }
@@ -36,7 +119,7 @@ impl MessageRole {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
-    pub id: String,
+    pub id: SessionId,
     pub messages: Vec<Message>,
     pub mcp_servers: Vec<MCPServerConfig>,
     pub available_tools: Vec<ToolDefinition>,
@@ -87,14 +170,14 @@ pub enum FinishReason {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
-    pub id: String,
+    pub id: ToolCallId,
     pub name: String,
     pub arguments: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
-    pub call_id: String,
+    pub call_id: ToolCallId,
     pub result: serde_json::Value,
     pub error: Option<String>,
 }
@@ -268,7 +351,7 @@ pub trait AgentAPI {
     
     async fn create_session(&self) -> Result<Session, AgentError>;
     
-    async fn get_session(&self, session_id: &str) -> Result<Option<Session>, AgentError>;
+    async fn get_session(&self, session_id: &SessionId) -> Result<Option<Session>, AgentError>;
     
     async fn update_session(&self, session: Session) -> Result<(), AgentError>;
     
@@ -311,7 +394,7 @@ mod tests {
     #[test]
     fn test_session_creation() {
         let session = Session {
-            id: "test-session".to_string(),
+            id: SessionId::new(),
             messages: Vec::new(),
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
@@ -319,7 +402,7 @@ mod tests {
             updated_at: SystemTime::now(),
         };
         
-        assert_eq!(session.id, "test-session");
+        assert!(!session.id.to_string().is_empty());
         assert!(session.messages.is_empty());
         assert!(session.mcp_servers.is_empty());
         assert!(session.available_tools.is_empty());
@@ -354,7 +437,7 @@ mod tests {
     #[test]
     fn test_generation_request() {
         let session = Session {
-            id: "test".to_string(),
+            id: SessionId::new(),
             messages: Vec::new(),
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
@@ -439,7 +522,7 @@ mod tests {
     #[test]
     fn test_tool_call_serialization() {
         let tool_call = ToolCall {
-            id: "call_123".to_string(),
+            id: ToolCallId::new(),
             name: "list_files".to_string(),
             arguments: serde_json::json!({"path": "/tmp"}),
         };
@@ -447,7 +530,77 @@ mod tests {
         let serialized = serde_json::to_string(&tool_call).unwrap();
         let deserialized: ToolCall = serde_json::from_str(&serialized).unwrap();
         
-        assert_eq!(deserialized.id, "call_123");
+        assert_eq!(deserialized.id.to_string(), tool_call.id.to_string());
         assert_eq!(deserialized.name, "list_files");
+    }
+    
+    #[test]
+    fn test_session_id() {
+        let session_id = SessionId::new();
+        let session_id_str = session_id.to_string();
+        
+        // Test that we can parse back the string representation
+        let parsed_session_id: SessionId = session_id_str.parse().unwrap();
+        assert_eq!(session_id, parsed_session_id);
+        
+        // Test serialization
+        let serialized = serde_json::to_string(&session_id).unwrap();
+        let deserialized: SessionId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(session_id, deserialized);
+        
+        // Test Display trait
+        assert!(!format!("{}", session_id).is_empty());
+    }
+    
+    #[test]
+    fn test_tool_call_id() {
+        let tool_call_id = ToolCallId::new();
+        let tool_call_id_str = tool_call_id.to_string();
+        
+        // Test that we can parse back the string representation
+        let parsed_tool_call_id: ToolCallId = tool_call_id_str.parse().unwrap();
+        assert_eq!(tool_call_id, parsed_tool_call_id);
+        
+        // Test serialization
+        let serialized = serde_json::to_string(&tool_call_id).unwrap();
+        let deserialized: ToolCallId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(tool_call_id, deserialized);
+        
+        // Test Display trait
+        assert!(!format!("{}", tool_call_id).is_empty());
+    }
+    
+    #[test]
+    fn test_message_with_tool_call() {
+        let tool_call_id = ToolCallId::new();
+        let message = Message {
+            role: MessageRole::Tool,
+            content: "Tool response content".to_string(),
+            tool_call_id: Some(tool_call_id.clone()),
+            tool_name: Some("test_tool".to_string()),
+            timestamp: SystemTime::now(),
+        };
+        
+        assert_eq!(message.role.as_str(), "tool");
+        assert_eq!(message.tool_call_id, Some(tool_call_id));
+        assert_eq!(message.tool_name.as_ref().unwrap(), "test_tool");
+    }
+    
+    #[test]
+    fn test_tool_result() {
+        let call_id = ToolCallId::new();
+        let result = ToolResult {
+            call_id: call_id.clone(),
+            result: serde_json::json!({"status": "success"}),
+            error: None,
+        };
+        
+        assert_eq!(result.call_id, call_id);
+        assert!(result.error.is_none());
+        
+        // Test serialization
+        let serialized = serde_json::to_string(&result).unwrap();
+        let deserialized: ToolResult = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.call_id, call_id);
     }
 }

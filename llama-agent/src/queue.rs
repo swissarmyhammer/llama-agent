@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
+use ulid::Ulid;
 
 #[derive(Debug)]
 pub struct QueuedRequest {
@@ -65,7 +65,7 @@ impl RequestQueue {
         let (response_sender, response_receiver) = oneshot::channel();
         
         let queued_request = QueuedRequest {
-            id: Uuid::new_v4().to_string(),
+            id: Ulid::new().to_string(),
             request,
             response_sender,
             stream_sender: None,
@@ -102,7 +102,7 @@ impl RequestQueue {
         let (stream_sender, stream_receiver) = mpsc::channel(100);
         
         let queued_request = QueuedRequest {
-            id: Uuid::new_v4().to_string(),
+            id: Ulid::new().to_string(),
             request,
             response_sender,
             stream_sender: Some(stream_sender),
@@ -280,7 +280,8 @@ impl RequestQueue {
         _context: Arc<MockContext>,
         stream_sender: mpsc::Sender<Result<StreamChunk, QueueError>>,
     ) {
-        let words = vec!["Mock", "streaming", "response", "for", "session", &request.session.id];
+        let session_id_str = request.session.id.to_string();
+        let words = vec!["Mock", "streaming", "response", "for", "session", &session_id_str];
         let mut token_count = 0;
         
         for (i, word) in words.iter().enumerate() {
@@ -315,7 +316,7 @@ impl Drop for RequestQueue {
 mod tests {
     use super::*;
     use crate::types::{
-        ModelConfig, ModelSource, QueueConfig, Session, Message, MessageRole
+        ModelConfig, ModelSource, QueueConfig, Session, Message, MessageRole, SessionId
     };
     use std::path::PathBuf;
     use std::time::SystemTime;
@@ -342,7 +343,7 @@ mod tests {
     
     fn create_test_session() -> Session {
         Session {
-            id: "test-session".to_string(),
+            id: SessionId::new(),
             messages: vec![
                 Message {
                     role: MessageRole::User,
