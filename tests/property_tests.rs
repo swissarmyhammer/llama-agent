@@ -183,7 +183,7 @@ proptest! {
     fn test_message_serialization(message in arb_message()) {
         let serialized = serde_json::to_string(&message).unwrap();
         let deserialized: Message = serde_json::from_str(&serialized).unwrap();
-        
+
         prop_assert_eq!(message.role.as_str(), deserialized.role.as_str());
         prop_assert_eq!(message.content, deserialized.content);
         prop_assert_eq!(message.tool_call_id, deserialized.tool_call_id);
@@ -194,7 +194,7 @@ proptest! {
     fn test_tool_definition_serialization(tool_def in arb_tool_definition()) {
         let serialized = serde_json::to_string(&tool_def).unwrap();
         let deserialized: ToolDefinition = serde_json::from_str(&serialized).unwrap();
-        
+
         prop_assert_eq!(tool_def.name, deserialized.name);
         prop_assert_eq!(tool_def.description, deserialized.description);
         prop_assert_eq!(tool_def.server_name, deserialized.server_name);
@@ -242,7 +242,7 @@ proptest! {
     fn test_agent_config_serialization(config in arb_agent_config()) {
         let serialized = serde_json::to_string(&config).unwrap();
         let deserialized: AgentConfig = serde_json::from_str(&serialized).unwrap();
-        
+
         prop_assert_eq!(config.model.batch_size, deserialized.model.batch_size);
         prop_assert_eq!(config.model.use_hf_params, deserialized.model.use_hf_params);
         prop_assert_eq!(config.queue_config.max_queue_size, deserialized.queue_config.max_queue_size);
@@ -257,9 +257,9 @@ proptest! {
             batch_size,
             ..Default::default()
         };
-        
+
         let validation_result = config.validate();
-        
+
         // Valid batch sizes should pass validation (other errors may occur due to model source)
         match validation_result {
             Ok(_) => {},
@@ -283,11 +283,11 @@ proptest! {
             tool_name: None,
             timestamp: std::time::SystemTime::now(),
         };
-        
+
         // Should be able to serialize/deserialize messages with empty content
         let serialized = serde_json::to_string(&message).unwrap();
         let deserialized: Message = serde_json::from_str(&serialized).unwrap();
-        
+
         prop_assert_eq!(&message.content, &deserialized.content);
         prop_assert!(message.content.is_empty());
     }
@@ -301,11 +301,11 @@ proptest! {
             tool_name: None,
             timestamp: std::time::SystemTime::now(),
         };
-        
+
         // Should handle long content properly
         let serialized = serde_json::to_string(&message).unwrap();
         let deserialized: Message = serde_json::from_str(&serialized).unwrap();
-        
+
         prop_assert_eq!(&message.content, &deserialized.content);
         prop_assert!(message.content.len() >= 1000);
     }
@@ -319,11 +319,11 @@ proptest! {
             tool_name: None,
             timestamp: std::time::SystemTime::now(),
         };
-        
+
         // Should handle various Unicode characters
         let serialized = serde_json::to_string(&message).unwrap();
         let deserialized: Message = serde_json::from_str(&serialized).unwrap();
-        
+
         prop_assert_eq!(message.content, deserialized.content);
     }
 
@@ -333,9 +333,9 @@ proptest! {
             batch_size,
             ..Default::default()
         };
-        
+
         let validation_result = config.validate();
-        
+
         if batch_size == 0 {
             prop_assert!(validation_result.is_err());
         } else if batch_size > 8192 {
@@ -359,9 +359,9 @@ proptest! {
             request_timeout: Duration::from_secs(timeout_secs),
             worker_threads: 1,
         };
-        
+
         let validation_result = config.validate();
-        
+
         if timeout_secs == 0 {
             prop_assert!(validation_result.is_err());
         } else {
@@ -376,12 +376,16 @@ proptest! {
 async fn test_session_id_uniqueness() {
     // Generate many session IDs and ensure they are unique
     let mut session_ids = std::collections::HashSet::new();
-    
+
     for _ in 0..1000 {
         let session_id = SessionId::new();
-        assert!(session_ids.insert(session_id), "Duplicate session ID generated: {}", session_id);
+        assert!(
+            session_ids.insert(session_id),
+            "Duplicate session ID generated: {}",
+            session_id
+        );
     }
-    
+
     assert_eq!(session_ids.len(), 1000);
 }
 
@@ -389,12 +393,16 @@ async fn test_session_id_uniqueness() {
 async fn test_tool_call_id_uniqueness() {
     // Generate many tool call IDs and ensure they are unique
     let mut tool_call_ids = std::collections::HashSet::new();
-    
+
     for _ in 0..1000 {
         let tool_call_id = ToolCallId::new();
-        assert!(tool_call_ids.insert(tool_call_id), "Duplicate tool call ID generated: {}", tool_call_id);
+        assert!(
+            tool_call_ids.insert(tool_call_id),
+            "Duplicate tool call ID generated: {}",
+            tool_call_id
+        );
     }
-    
+
     assert_eq!(tool_call_ids.len(), 1000);
 }
 
@@ -402,10 +410,10 @@ async fn test_tool_call_id_uniqueness() {
 async fn test_message_timestamp_ordering() {
     // Test that message timestamps are ordered correctly
     let mut messages = Vec::new();
-    
+
     for i in 0..10 {
         tokio::time::sleep(Duration::from_millis(1)).await;
-        
+
         let message = Message {
             role: MessageRole::User,
             content: format!("Message {}", i),
@@ -415,15 +423,20 @@ async fn test_message_timestamp_ordering() {
         };
         messages.push(message);
     }
-    
+
     // Verify timestamps are in order (allowing for some clock jitter)
     for i in 1..messages.len() {
-        let prev_time = messages[i-1].timestamp;
+        let prev_time = messages[i - 1].timestamp;
         let curr_time = messages[i].timestamp;
-        
+
         // Should be greater than or equal (allowing for clock resolution limits)
-        assert!(curr_time >= prev_time, 
+        assert!(
+            curr_time >= prev_time,
             "Message {} timestamp {:?} is before message {} timestamp {:?}",
-            i, curr_time, i-1, prev_time);
+            i,
+            curr_time,
+            i - 1,
+            prev_time
+        );
     }
 }

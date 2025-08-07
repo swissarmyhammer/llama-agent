@@ -90,7 +90,7 @@ pub struct Message {
     pub timestamp: SystemTime,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MessageRole {
     System,
     User,
