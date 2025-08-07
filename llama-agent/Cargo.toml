@@ -1,0 +1,31 @@
+[package]
+name = "llama-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core inference
+llama-cpp-2 = { workspace = true }
+
+# MCP integration  
+rmcp = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Async traits
+async-trait = { workspace = true }
