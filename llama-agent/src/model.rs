@@ -583,6 +583,7 @@ mod tests {
             source: ModelSource::Local { folder, filename },
             batch_size: 512,
             use_hf_params: false,
+            verbose_logging: false,
         }
     }
 
@@ -591,6 +592,7 @@ mod tests {
             source: ModelSource::HuggingFace { repo, filename },
             batch_size: 512,
             use_hf_params: true,
+            verbose_logging: false,
         }
     }
 

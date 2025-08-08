@@ -990,6 +990,7 @@ mod tests {
             },
             batch_size: 512,
             use_hf_params: true,
+            verbose_logging: false,
         };
 
         assert!(config.validate().is_ok());
@@ -1004,6 +1005,7 @@ mod tests {
             },
             batch_size: 0,
             use_hf_params: true,
+            verbose_logging: false,
         };
 
         assert!(config.validate().is_err());
@@ -1015,6 +1017,7 @@ mod tests {
             },
             batch_size: 10000,
             use_hf_params: true,
+            verbose_logging: false,
         };
 
         assert!(config.validate().is_err());

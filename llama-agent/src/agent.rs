@@ -996,6 +996,7 @@ mod tests {
                 },
                 batch_size: 512,
                 use_hf_params: false,
+                verbose_logging: false,
             },
             queue_config: QueueConfig::default(),
             mcp_servers: Vec::new(),
@@ -1062,6 +1063,7 @@ mod tests {
             },
             batch_size: 512,
             use_hf_params: false,
+            verbose_logging: false,
         };
 
         let valid_config = AgentConfig {

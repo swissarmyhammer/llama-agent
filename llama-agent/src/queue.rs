@@ -1259,6 +1259,7 @@ mod tests {
             },
             batch_size: 512,
             use_hf_params: false,
+            verbose_logging: false,
         }
     }
 
@@ -1301,6 +1302,7 @@ mod tests {
             },
             batch_size: 512,
             use_hf_params: false,
+            verbose_logging: false,
         };
 
         let manager = Arc::new(ModelManager::new(config).expect("Failed to create ModelManager"));
