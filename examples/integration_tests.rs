@@ -515,7 +515,7 @@ async fn test_streaming_patterns() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let generation_request = GenerationRequest {
-        session,
+        session_id: session.id.clone(),
         max_tokens: Some(100),
         temperature: Some(0.7),
         top_p: Some(0.9),

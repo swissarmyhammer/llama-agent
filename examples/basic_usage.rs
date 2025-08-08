@@ -91,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate response
     let request = GenerationRequest {
-        session: session.clone(),
+        session_id: session.id.clone(),
         max_tokens: Some(100),
         temperature: Some(0.7),
         top_p: Some(0.9),

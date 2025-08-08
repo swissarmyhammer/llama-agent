@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create generation request for streaming
     let request = GenerationRequest {
-        session: session.clone(),
+        session_id: session.id.clone(),
         max_tokens: Some(500),
         temperature: Some(0.7),
         top_p: Some(0.9),
@@ -133,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let batch_request = GenerationRequest {
-        session: batch_session,
+        session_id: batch_session.id.clone(),
         max_tokens: Some(500),
         temperature: Some(0.7),
         top_p: Some(0.9),

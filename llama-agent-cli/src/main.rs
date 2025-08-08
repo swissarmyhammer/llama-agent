@@ -382,7 +382,7 @@ async fn run_agent(args: Args) -> Result<String> {
 
     // Create generation request
     let request = GenerationRequest {
-        session: session.clone(),
+        session_id: session.id.clone(),
         max_tokens: Some(args.limit),
         temperature: Some(args.temperature),
         top_p: Some(args.top_p),
