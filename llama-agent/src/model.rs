@@ -205,8 +205,8 @@ impl ModelManager {
 
         // Load the downloaded model
         let model_params = LlamaModelParams::default();
-        let model = LlamaModel::load_from_file(&self.backend, &model_path, &model_params)
-            .map_err(|e| {
+        let model =
+            LlamaModel::load_from_file(&self.backend, &model_path, &model_params).map_err(|e| {
                 ModelError::LoadingFailed(format!(
                     "Failed to load downloaded model from {}: {}",
                     model_path.display(),
@@ -217,7 +217,10 @@ impl ModelManager {
         Ok(model)
     }
 
-    async fn auto_detect_hf_model_file(&self, repo_api: &hf_hub::api::tokio::ApiRepo) -> Result<String, ModelError> {
+    async fn auto_detect_hf_model_file(
+        &self,
+        repo_api: &hf_hub::api::tokio::ApiRepo,
+    ) -> Result<String, ModelError> {
         // List files in the repository
         match repo_api.info().await {
             Ok(repo_info) => {

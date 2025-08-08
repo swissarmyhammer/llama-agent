@@ -7,6 +7,10 @@ edition = "2021"
 name = "llama-agent-cli"
 path = "src/main.rs"
 
+[lib]
+name = "llama_agent_cli"
+path = "src/lib.rs"
+
 [dependencies]
 # Reference to the core library
 llama-agent = { path = "../llama-agent" }
@@ -23,4 +27,8 @@ anyhow = { workspace = true }
 
 # Utilities
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
