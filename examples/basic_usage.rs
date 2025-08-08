@@ -13,7 +13,7 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
+        MessageRole, ModelConfig, ModelSource, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -36,7 +36,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             batch_size: 512,
             use_hf_params: true, // Use HuggingFace generation_config.json
-            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: 100,
@@ -53,7 +52,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout_secs: None,
         }],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     info!("Initializing AgentServer (this may take a while for model loading)...");

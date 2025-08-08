@@ -142,9 +142,15 @@ impl DependencyAnalyzer {
                     if let Some(captures) = pattern.captures(s) {
                         if let Some(referenced_tool) = captures.get(1) {
                             references.push(ParameterReference {
+                                parameter_name: path
+                                    .split('.')
+                                    .next_back()
+                                    .unwrap_or(path)
+                                    .to_string(),
                                 parameter_path: path.to_string(),
                                 referenced_tool: referenced_tool.as_str().to_string(),
                                 reference_type: ReferenceType::DirectOutput,
+                                target_tool: None,
                             });
                         }
                     }
@@ -179,6 +185,7 @@ impl DependencyAnalyzer {
 
             for resource in resources {
                 let resource_key = match &resource.resource {
+                    ResourceType::File(path) => format!("file:{}", path),
                     ResourceType::FileSystem(path) => format!("fs:{}", path),
                     ResourceType::Network(url) => format!("net:{}", url),
                     ResourceType::Database(db) => format!("db:{}", db),
@@ -189,7 +196,7 @@ impl DependencyAnalyzer {
 
                 resource_usage
                     .entry(resource_key.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push((tool_call.name.clone(), resource.access_type.clone()));
             }
         }
@@ -315,17 +322,19 @@ impl DependencyAnalyzer {
 
     /// Checks for explicitly configured conflicts
     fn check_configured_conflicts(&self, tool_calls: &[ToolCall]) -> Option<ToolConflict> {
-        let tool_names: HashSet<&String> = tool_calls.iter().map(|call| &call.name).collect();
+        let tool_names: HashSet<&str> = tool_calls.iter().map(|call| call.name.as_str()).collect();
 
         for conflict in &self.config.tool_conflicts {
-            if tool_names.contains(&conflict.tool1) && tool_names.contains(&conflict.tool2) {
+            if tool_names.contains(conflict.tool1.as_str())
+                && tool_names.contains(conflict.tool2.as_str())
+            {
                 return Some(conflict.clone());
             }
         }
 
         // Check never_parallel pairs
         for (tool1, tool2) in &self.config.never_parallel {
-            if tool_names.contains(tool1) && tool_names.contains(tool2) {
+            if tool_names.contains(tool1.as_str()) && tool_names.contains(tool2.as_str()) {
                 return Some(ToolConflict {
                     tool1: tool1.clone(),
                     tool2: tool2.clone(),

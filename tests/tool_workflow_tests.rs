@@ -2,8 +2,8 @@ use llama_agent::{
     agent::AgentServer,
     types::{
         AgentAPI, AgentConfig, FinishReason, MCPServerConfig, Message, MessageRole, ModelConfig,
-        ModelSource, ParallelExecutionConfig, QueueConfig, Session, SessionConfig, SessionId,
-        ToolCall, ToolCallId, ToolDefinition, ToolResult,
+        ModelSource, QueueConfig, Session, SessionConfig, SessionId, ToolCall, ToolCallId,
+        ToolDefinition, ToolResult,
     },
 };
 use serde_json::json;
@@ -31,12 +31,10 @@ async fn test_tool_call_detection() {
             },
             batch_size: 512,
             use_hf_params: false,
-            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: Vec::new(),
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     // The initialization will fail due to the fake model file, but that's expected

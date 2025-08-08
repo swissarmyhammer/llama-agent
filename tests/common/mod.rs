@@ -1,7 +1,6 @@
 use llama_agent::{
-    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig,
-    QueueConfig, Session, SessionConfig, SessionId, ToolCall, ToolCallId, ToolDefinition,
-    ToolResult,
+    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, QueueConfig, Session,
+    SessionConfig, SessionId, ToolCall, ToolCallId, ToolDefinition, ToolResult,
 };
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -23,7 +22,6 @@ impl TestHelper {
                 },
                 batch_size: 128,
                 use_hf_params: false,
-                verbose_logging: false,
             },
             queue_config: QueueConfig {
                 max_queue_size: 10,
@@ -35,7 +33,6 @@ impl TestHelper {
                 max_sessions: 10,
                 session_timeout: Duration::from_secs(300), // 5 minutes for tests
             },
-            parallel_execution_config: ParallelExecutionConfig::default(),
         }
     }
 
@@ -143,7 +140,6 @@ impl TestHelper {
                 },
                 batch_size: 128,
                 use_hf_params: false,
-                verbose_logging: false,
             },
             queue_config: QueueConfig {
                 max_queue_size: 5,
@@ -155,7 +151,6 @@ impl TestHelper {
                 max_sessions: 5,
                 session_timeout: Duration::from_secs(60),
             },
-            parallel_execution_config: ParallelExecutionConfig::default(),
         }
     }
 }

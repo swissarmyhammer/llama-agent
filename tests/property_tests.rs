@@ -96,7 +96,6 @@ prop_compose! {
             },
             batch_size,
             use_hf_params,
-            verbose_logging: false,
         }
     }
 }
@@ -139,7 +138,6 @@ prop_compose! {
             queue_config,
             mcp_servers,
             session_config,
-            parallel_execution_config: ParallelExecutionConfig::default(),
         }
     }
 }
