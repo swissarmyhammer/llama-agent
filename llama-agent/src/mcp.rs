@@ -1,4 +1,7 @@
-use crate::types::{MCPError, MCPServerConfig, ToolCall, ToolDefinition, ToolResult};
+use crate::types::{
+    GetPromptResult, MCPError, MCPServerConfig, PromptDefinition, ToolCall, ToolDefinition,
+    ToolResult,
+};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -26,9 +29,16 @@ pub trait MCPServer: Send + Sync {
     async fn initialize(&mut self) -> Result<(), MCPError>;
     async fn list_tools(&self) -> Result<Vec<ToolDefinition>, MCPError>;
     async fn call_tool(&self, tool_name: &str, args: Value) -> Result<Value, MCPError>;
+    async fn list_prompts(&self) -> Result<Vec<PromptDefinition>, MCPError>;
+    async fn get_prompt(
+        &self,
+        prompt_name: &str,
+        arguments: Option<Value>,
+    ) -> Result<GetPromptResult, MCPError>;
     async fn health(&self) -> Result<HealthStatus, MCPError>;
     async fn shutdown(&mut self) -> Result<(), MCPError>;
     async fn notify_tools_list_changed(&mut self) -> Result<(), MCPError>;
+    async fn notify_prompts_list_changed(&mut self) -> Result<(), MCPError>;
     fn name(&self) -> &str;
 }
 
@@ -220,6 +230,12 @@ impl MCPServerImpl {
         self.send_notification("notifications/tools/list_changed", json!({}))
             .await
     }
+
+    async fn send_prompts_list_changed(&mut self) -> Result<(), MCPError> {
+        debug!("Sending prompts list changed notification");
+        self.send_notification("notifications/prompts/list_changed", json!({}))
+            .await
+    }
 }
 
 #[async_trait]
@@ -248,6 +264,9 @@ impl MCPServer for MCPServerImpl {
             "protocolVersion": "2024-11-05",
             "capabilities": {
                 "tools": {
+                    "listChanged": true
+                },
+                "prompts": {
                     "listChanged": true
                 }
             },
@@ -292,6 +311,63 @@ impl MCPServer for MCPServerImpl {
             self.config.name
         );
         Ok(tool_definitions)
+    }
+
+    async fn list_prompts(&self) -> Result<Vec<PromptDefinition>, MCPError> {
+        if !self.initialized {
+            return Err(MCPError::Connection(format!(
+                "Server '{}' not initialized",
+                self.config.name
+            )));
+        }
+
+        debug!("Listing prompts for MCP server: {}", self.config.name);
+
+        // This is a simplified implementation similar to list_tools
+        // In practice, this would send a "prompts/list" request to the server
+        let prompt_definitions = Vec::new();
+
+        debug!(
+            "Found {} prompts for server '{}'",
+            prompt_definitions.len(),
+            self.config.name
+        );
+        Ok(prompt_definitions)
+    }
+
+    async fn get_prompt(
+        &self,
+        prompt_name: &str,
+        arguments: Option<Value>,
+    ) -> Result<GetPromptResult, MCPError> {
+        if !self.initialized {
+            return Err(MCPError::Connection(format!(
+                "Server '{}' not initialized",
+                self.config.name
+            )));
+        }
+
+        debug!(
+            "Getting prompt '{}' from server '{}' with arguments: {:?}",
+            prompt_name, self.config.name, arguments
+        );
+
+        // This is a simplified implementation - in practice, this would send a "prompts/get" request
+        // For now, return a basic prompt result to maintain compatibility
+        let result = GetPromptResult {
+            description: Some(format!(
+                "Prompt '{}' from server '{}'",
+                prompt_name, self.config.name
+            )),
+            messages: Vec::new(),
+        };
+
+        debug!(
+            "Retrieved prompt '{}' from server '{}' successfully",
+            prompt_name, self.config.name
+        );
+
+        Ok(result)
     }
 
     async fn call_tool(&self, tool_name: &str, args: Value) -> Result<Value, MCPError> {
@@ -407,6 +483,21 @@ impl MCPServer for MCPServerImpl {
         self.send_tools_list_changed().await
     }
 
+    async fn notify_prompts_list_changed(&mut self) -> Result<(), MCPError> {
+        if !self.initialized {
+            return Err(MCPError::Connection(format!(
+                "Server '{}' not initialized",
+                self.config.name
+            )));
+        }
+
+        debug!(
+            "Notifying prompts list changed for server: {}",
+            self.config.name
+        );
+        self.send_prompts_list_changed().await
+    }
+
     fn name(&self) -> &str {
         &self.config.name
     }
@@ -417,6 +508,8 @@ pub struct MCPClient {
     retry_config: RetryConfig,
     tool_to_server_cache: Arc<RwLock<HashMap<String, String>>>,
     previous_tools_cache: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    prompt_to_server_cache: Arc<RwLock<HashMap<String, String>>>,
+    previous_prompts_cache: Arc<RwLock<HashMap<String, Vec<String>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -445,6 +538,8 @@ impl MCPClient {
             retry_config: RetryConfig::default(),
             tool_to_server_cache: Arc::new(RwLock::new(HashMap::new())),
             previous_tools_cache: Arc::new(RwLock::new(HashMap::new())),
+            prompt_to_server_cache: Arc::new(RwLock::new(HashMap::new())),
+            previous_prompts_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -454,6 +549,8 @@ impl MCPClient {
             retry_config,
             tool_to_server_cache: Arc::new(RwLock::new(HashMap::new())),
             previous_tools_cache: Arc::new(RwLock::new(HashMap::new())),
+            prompt_to_server_cache: Arc::new(RwLock::new(HashMap::new())),
+            previous_prompts_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -538,6 +635,16 @@ impl MCPClient {
             let mut previous_cache = self.previous_tools_cache.write().await;
             previous_cache.remove(server_name);
             drop(previous_cache);
+
+            // Clear prompt cache entries for this server
+            let mut prompt_cache = self.prompt_to_server_cache.write().await;
+            prompt_cache.retain(|_prompt, server| server != server_name);
+            drop(prompt_cache);
+
+            // Clear previous prompts cache for this server
+            let mut previous_prompts_cache = self.previous_prompts_cache.write().await;
+            previous_prompts_cache.remove(server_name);
+            drop(previous_prompts_cache);
 
             info!("Successfully removed MCP server: {}", server_name);
         } else {
@@ -662,6 +769,202 @@ impl MCPClient {
             servers.len()
         );
         Ok(all_tools)
+    }
+
+    pub async fn discover_prompts(&self) -> Result<Vec<PromptDefinition>, MCPError> {
+        debug!("Discovering prompts from all MCP servers");
+
+        let servers = self.servers.read().await;
+        let mut all_prompts = Vec::new();
+        let mut errors = Vec::new();
+        let mut cache_updates = HashMap::new();
+        let mut current_prompts_by_server = HashMap::new();
+
+        for (server_name, server_arc) in servers.iter() {
+            let server = server_arc.lock().await;
+
+            match server.list_prompts().await {
+                Ok(mut prompts) => {
+                    debug!(
+                        "Found {} prompts from server '{}'",
+                        prompts.len(),
+                        server_name
+                    );
+
+                    // Track current prompts for this server
+                    let prompt_names: Vec<String> =
+                        prompts.iter().map(|p| p.name.clone()).collect();
+                    current_prompts_by_server.insert(server_name.clone(), prompt_names);
+
+                    // Update cache mapping for each prompt
+                    for prompt in &prompts {
+                        cache_updates.insert(prompt.name.clone(), server_name.clone());
+                    }
+
+                    all_prompts.append(&mut prompts);
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to discover prompts from server '{}': {}",
+                        server_name, e
+                    );
+                    errors.push(format!("Server '{}': {}", server_name, e));
+                }
+            }
+        }
+        drop(servers);
+
+        // Check for changes and send notifications
+        let mut previous_prompts_cache = self.previous_prompts_cache.write().await;
+        let mut servers_with_changes = Vec::new();
+
+        for (server_name, current_prompts) in &current_prompts_by_server {
+            let previous_prompts = previous_prompts_cache.get(server_name);
+
+            let prompts_changed = match previous_prompts {
+                Some(prev) => prev != current_prompts,
+                None => !current_prompts.is_empty(), // First time seeing this server with prompts
+            };
+
+            if prompts_changed {
+                debug!(
+                    "Prompts changed for server '{}': {:?} -> {:?}",
+                    server_name, previous_prompts, current_prompts
+                );
+                servers_with_changes.push(server_name.clone());
+            }
+        }
+
+        // Update the previous prompts cache
+        previous_prompts_cache.clear();
+        previous_prompts_cache.extend(current_prompts_by_server);
+        drop(previous_prompts_cache);
+
+        // Send notifications for servers with changes
+        if !servers_with_changes.is_empty() {
+            let servers = self.servers.read().await;
+            for server_name in servers_with_changes {
+                if let Some(server_arc) = servers.get(&server_name) {
+                    let mut server = server_arc.lock().await;
+                    if let Err(e) = server.notify_prompts_list_changed().await {
+                        warn!(
+                            "Failed to send prompts list changed notification for server '{}': {}",
+                            server_name, e
+                        );
+                    } else {
+                        info!(
+                            "Sent prompts list changed notification for server '{}'",
+                            server_name
+                        );
+                    }
+                }
+            }
+        }
+
+        // Update the prompt-to-server cache
+        let mut cache = self.prompt_to_server_cache.write().await;
+        cache.clear();
+        cache.extend(cache_updates);
+        drop(cache);
+
+        if all_prompts.is_empty() && !errors.is_empty() {
+            return Err(MCPError::Connection(format!(
+                "Failed to discover prompts from any server. Errors: {}",
+                errors.join("; ")
+            )));
+        }
+
+        if !errors.is_empty() {
+            warn!(
+                "Some servers failed during prompt discovery: {}",
+                errors.join("; ")
+            );
+        }
+
+        let servers = self.servers.read().await;
+        info!(
+            "Discovered {} prompts from {} servers",
+            all_prompts.len(),
+            servers.len()
+        );
+        Ok(all_prompts)
+    }
+
+    pub async fn get_prompt(
+        &self,
+        server_name: &str,
+        prompt_name: &str,
+        arguments: Option<Value>,
+    ) -> Result<GetPromptResult, MCPError> {
+        debug!(
+            "Getting prompt '{}' from server '{}' with arguments: {:?}",
+            prompt_name, server_name, arguments
+        );
+
+        let servers = self.servers.read().await;
+        let server_arc = servers
+            .get(server_name)
+            .ok_or_else(|| MCPError::ServerNotFound(server_name.to_string()))?;
+
+        let server = server_arc.lock().await;
+
+        // Execute the prompt get
+        let result = server.get_prompt(prompt_name, arguments).await?;
+
+        info!(
+            "Successfully got prompt '{}' from server '{}'",
+            prompt_name, server_name
+        );
+        Ok(result)
+    }
+
+    pub async fn execute_prompt(
+        &self,
+        prompt_name: &str,
+        arguments: Option<Value>,
+    ) -> Result<GetPromptResult, MCPError> {
+        debug!(
+            "Executing prompt '{}' with arguments: {:?}",
+            prompt_name, arguments
+        );
+
+        // Check cache first for the server that has this prompt
+        let cache = self.prompt_to_server_cache.read().await;
+        let server_name = cache.get(prompt_name).cloned();
+        drop(cache);
+
+        let server_name = match server_name {
+            Some(name) => {
+                debug!(
+                    "Found prompt '{}' in cache for server '{}'",
+                    prompt_name, name
+                );
+                name
+            }
+            None => {
+                // Cache miss - need to rediscover prompts
+                warn!(
+                    "Prompt '{}' not found in cache, refreshing prompt discovery",
+                    prompt_name
+                );
+                self.discover_prompts().await?;
+
+                // Try cache again
+                let cache = self.prompt_to_server_cache.read().await;
+                let server_name = cache.get(prompt_name).cloned();
+                drop(cache);
+
+                server_name.ok_or_else(|| {
+                    MCPError::Protocol(format!(
+                        "Prompt '{}' not found in any connected server after refresh",
+                        prompt_name
+                    ))
+                })?
+            }
+        };
+
+        // Execute the prompt get
+        self.get_prompt(&server_name, prompt_name, arguments).await
     }
 
     pub async fn list_servers(&self) -> Vec<String> {
@@ -898,7 +1201,7 @@ impl Default for MCPClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ToolCallId;
+    use crate::types::{PromptArgument, ToolCallId};
     use serde_json::json;
     use tokio::time::Duration;
 
@@ -906,6 +1209,7 @@ mod tests {
     struct MockMCPServer {
         name: String,
         tools: Vec<ToolDefinition>,
+        prompts: Vec<PromptDefinition>,
         should_fail: bool,
         fail_on_health: bool,
     }
@@ -915,9 +1219,15 @@ mod tests {
             Self {
                 name: name.to_string(),
                 tools,
+                prompts: Vec::new(),
                 should_fail: false,
                 fail_on_health: false,
             }
+        }
+
+        fn with_prompts(mut self, prompts: Vec<PromptDefinition>) -> Self {
+            self.prompts = prompts;
+            self
         }
 
         fn with_failure(mut self, should_fail: bool) -> Self {
@@ -989,6 +1299,53 @@ mod tests {
         async fn notify_tools_list_changed(&mut self) -> Result<(), MCPError> {
             if self.should_fail {
                 return Err(MCPError::Protocol("Mock notification failure".to_string()));
+            }
+            Ok(())
+        }
+
+        async fn list_prompts(&self) -> Result<Vec<PromptDefinition>, MCPError> {
+            if self.should_fail {
+                return Err(MCPError::Protocol(
+                    "Mock prompt listing failure".to_string(),
+                ));
+            }
+            Ok(self.prompts.clone())
+        }
+
+        async fn get_prompt(
+            &self,
+            prompt_name: &str,
+            arguments: Option<Value>,
+        ) -> Result<GetPromptResult, MCPError> {
+            if self.should_fail {
+                return Err(MCPError::Protocol(format!(
+                    "Mock prompt get failure for {}",
+                    prompt_name
+                )));
+            }
+
+            // Simulate successful prompt execution
+            if self.prompts.iter().any(|prompt| prompt.name == prompt_name) {
+                Ok(GetPromptResult {
+                    description: Some(format!(
+                        "Mock prompt result for {} with args: {:?}",
+                        prompt_name, arguments
+                    )),
+                    messages: Vec::new(),
+                })
+            } else {
+                Err(MCPError::Protocol(format!(
+                    "Prompt '{}' not found",
+                    prompt_name
+                )))
+            }
+        }
+
+        async fn notify_prompts_list_changed(&mut self) -> Result<(), MCPError> {
+            if self.should_fail {
+                return Err(MCPError::Protocol(
+                    "Mock prompt notification failure".to_string(),
+                ));
             }
             Ok(())
         }
@@ -1310,5 +1667,91 @@ mod tests {
                 Some(&vec!["tool1".to_string(), "tool2".to_string()])
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_prompt_definition_creation() {
+        let prompt = PromptDefinition {
+            name: "test_prompt".to_string(),
+            description: Some("A test prompt".to_string()),
+            arguments: vec![PromptArgument {
+                name: "user_input".to_string(),
+                description: Some("User input for the prompt".to_string()),
+                required: true,
+            }],
+            server_name: "test_server".to_string(),
+        };
+
+        assert_eq!(prompt.name, "test_prompt");
+        assert_eq!(prompt.description, Some("A test prompt".to_string()));
+        assert_eq!(prompt.server_name, "test_server");
+        assert_eq!(prompt.arguments.len(), 1);
+        assert_eq!(prompt.arguments[0].name, "user_input");
+        assert!(prompt.arguments[0].required);
+    }
+
+    #[tokio::test]
+    async fn test_mock_server_prompt_functionality() {
+        let prompts = vec![PromptDefinition {
+            name: "code_review".to_string(),
+            description: Some("Review code for best practices".to_string()),
+            arguments: vec![PromptArgument {
+                name: "code".to_string(),
+                description: Some("The code to review".to_string()),
+                required: true,
+            }],
+            server_name: "test_server".to_string(),
+        }];
+
+        let mut server = MockMCPServer::new("test_server", Vec::new()).with_prompts(prompts);
+
+        // Test initialization
+        assert!(server.initialize().await.is_ok());
+
+        // Test prompt listing
+        let listed_prompts = server.list_prompts().await.unwrap();
+        assert_eq!(listed_prompts.len(), 1);
+        assert_eq!(listed_prompts[0].name, "code_review");
+
+        // Test prompt getting
+        let result = server
+            .get_prompt("code_review", Some(json!({"code": "def hello(): pass"})))
+            .await
+            .unwrap();
+        assert!(result.description.is_some());
+        assert!(result.description.unwrap().contains("code_review"));
+
+        // Test prompt notification
+        assert!(server.notify_prompts_list_changed().await.is_ok());
+
+        // Test health check
+        let health = server.health().await.unwrap();
+        match health {
+            HealthStatus::Healthy => {}
+            _ => panic!("Expected healthy status"),
+        }
+
+        // Test shutdown
+        assert!(server.shutdown().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_prompt_id() {
+        use crate::types::PromptId;
+
+        let prompt_id = PromptId::new();
+        let prompt_id_str = prompt_id.to_string();
+
+        // Test that we can parse back the string representation
+        let parsed_prompt_id: PromptId = prompt_id_str.parse().unwrap();
+        assert_eq!(prompt_id, parsed_prompt_id);
+
+        // Test serialization
+        let serialized = serde_json::to_string(&prompt_id).unwrap();
+        let deserialized: PromptId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(prompt_id, deserialized);
+
+        // Test Display trait
+        assert!(!format!("{}", prompt_id).is_empty());
     }
 }

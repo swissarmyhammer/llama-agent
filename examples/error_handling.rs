@@ -23,17 +23,7 @@ use tracing::{error, info, warn};
 
 // Constants for example configurations
 const DEFAULT_BATCH_SIZE: u32 = 512;
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
-const EXTENDED_TIMEOUT_SECS: u64 = 60;
-const LONG_TIMEOUT_SECS: u64 = 120;
 const LARGE_MAX_TOKENS: u32 = 10000;
-const DEFAULT_MAX_TOKENS: u32 = 100;
-const CONSERVATIVE_BATCH_SIZE: u32 = 256;
-const LARGE_QUEUE_SIZE: usize = 1000;
-const DEFAULT_QUEUE_SIZE: usize = 100;
-const LARGE_SESSION_LIMIT: usize = 100;
-const GENEROUS_TIMEOUT_SECS: u64 = 300;
-const LONG_SESSION_TIMEOUT_SECS: u64 = 7200;
 const RETRY_INITIAL_DELAY_MS: u64 = 100;
 const MAX_RETRY_ATTEMPTS: usize = 5;
 

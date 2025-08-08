@@ -71,6 +71,7 @@ impl TestHelper {
             ],
             mcp_servers: vec![],
             available_tools: vec![],
+            available_prompts: vec![],
             created_at: now,
             updated_at: now,
         }
