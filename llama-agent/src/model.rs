@@ -11,8 +11,37 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
+// Need access to raw FFI bindings for llama_log_set
+use std::ffi::c_void;
+use std::os::raw::c_char;
 
 static GLOBAL_BACKEND: OnceLock<Arc<LlamaBackend>> = OnceLock::new();
+
+// Null log callback to suppress llama.cpp verbose output
+extern "C" fn null_log_callback(_level: i32, _text: *const c_char, _user_data: *mut c_void) {
+    // Do nothing - this suppresses all llama.cpp logging
+}
+
+// Set up logging suppression using llama_log_set
+fn set_logging_suppression(suppress: bool) {
+    unsafe {
+        // Access the raw FFI binding
+        extern "C" {
+            fn llama_log_set(
+                log_callback: Option<extern "C" fn(i32, *const c_char, *mut c_void)>,
+                user_data: *mut c_void,
+            );
+        }
+
+        if suppress {
+            // Set null callback to suppress logging
+            llama_log_set(Some(null_log_callback), std::ptr::null_mut());
+        } else {
+            // Restore default logging (NULL callback means output to stderr)
+            llama_log_set(None, std::ptr::null_mut());
+        }
+    }
+}
 
 pub struct ModelManager {
     model: Arc<RwLock<Option<LlamaModel>>>,
@@ -29,12 +58,14 @@ impl ModelManager {
             // Enable debug logging - send llama.cpp logs to tracing
             send_logs_to_tracing(LogOptions::default());
             debug!("Enabled verbose llama.cpp logging via tracing");
+            set_logging_suppression(false);
         } else {
             // When debug is false, we rely on the tracing level configuration
             // from main.rs (WARN level) to filter out verbose logs
             debug!("llama.cpp logs will be filtered by tracing WARN level");
+            set_logging_suppression(true);
         }
-        
+
         // Get existing backend or try to initialize new one
         let backend = if let Some(backend) = GLOBAL_BACKEND.get() {
             backend.clone()
