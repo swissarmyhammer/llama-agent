@@ -7,26 +7,13 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, GenerationRequest, MCPServerConfig, Message, MessageRole,
-        ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig, SessionId,
+        ModelConfig, ModelSource, QueueConfig, SessionConfig, SessionId,
     },
     AgentServer,
 };
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 use tracing::{info, warn};
-
-// Constants for integration tests
-const DEFAULT_BATCH_SIZE: u32 = 512;
-const LARGE_BATCH_SIZE: u32 = 1024;
-const SMALL_BATCH_SIZE: u32 = 128;
-const MEDIUM_BATCH_SIZE: u32 = 256;
-const SMALL_QUEUE_SIZE: usize = 50;
-const DEFAULT_QUEUE_SIZE: usize = 100;
-const LARGE_QUEUE_SIZE: usize = 1000;
-const DEFAULT_MAX_TOKENS: u32 = 100;
-const SMALL_SESSION_LIMIT: usize = 100;
-const MODERATE_SESSION_LIMIT: usize = 1000;
-const HIGH_SESSION_LIMIT: usize = 10000;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -181,14 +168,12 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
                 repo: "microsoft/DialoGPT-medium".to_string(),
                 filename: None,
             },
-            batch_size: DEFAULT_BATCH_SIZE,
+            batch_size: 512,
             use_hf_params: true,
-            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     // Configuration should pass validation (even if model loading fails)
@@ -206,12 +191,10 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
             },
             batch_size: 0, // Invalid
             use_hf_params: true,
-            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match invalid_batch_config.validate() {
@@ -226,14 +209,12 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
                 repo: "invalid-repo".to_string(), // No org/repo format
                 filename: None,
             },
-            batch_size: DEFAULT_BATCH_SIZE,
+            batch_size: 512,
             use_hf_params: true,
-            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match invalid_repo_config.validate() {
@@ -249,14 +230,12 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
                 folder: temp_dir,
                 filename: None,
             },
-            batch_size: DEFAULT_BATCH_SIZE,
+            batch_size: 512,
             use_hf_params: false,
-            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match valid_local_config.validate() {
@@ -277,14 +256,12 @@ async fn test_agent_initialization() -> Result<(), Box<dyn std::error::Error>> {
                 folder: PathBuf::from("/nonexistent/path"),
                 filename: None,
             },
-            batch_size: DEFAULT_BATCH_SIZE,
+            batch_size: 512,
             use_hf_params: false,
-            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match AgentServer::initialize(invalid_model_config).await {
@@ -311,7 +288,6 @@ async fn test_agent_initialization() -> Result<(), Box<dyn std::error::Error>> {
         },
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match AgentServer::initialize(invalid_queue_config).await {
@@ -533,20 +509,19 @@ async fn test_streaming_patterns() -> Result<(), Box<dyn std::error::Error>> {
         messages: vec![],
         mcp_servers: vec![],
         available_tools: vec![],
-        available_prompts: vec![],
         created_at: SystemTime::now(),
         updated_at: SystemTime::now(),
     };
 
     let generation_request = GenerationRequest {
         session,
-        max_tokens: Some(DEFAULT_MAX_TOKENS),
+        max_tokens: Some(100),
         temperature: Some(0.7),
         top_p: Some(0.9),
         stop_tokens: vec!["</s>".to_string()],
     };
 
-    if generation_request.max_tokens != Some(DEFAULT_MAX_TOKENS) {
+    if generation_request.max_tokens != Some(100) {
         return Err("Generation request should preserve max_tokens".into());
     }
 
@@ -565,21 +540,19 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
                 repo: "microsoft/DialoGPT-medium".to_string(),
                 filename: None,
             },
-            batch_size: LARGE_BATCH_SIZE, // Large batch
+            batch_size: 1024, // Large batch
             use_hf_params: true,
-            verbose_logging: false,
         },
         queue_config: QueueConfig {
-            max_queue_size: LARGE_QUEUE_SIZE, // Large queue
+            max_queue_size: 1000, // Large queue
             request_timeout: Duration::from_secs(180),
             worker_threads: 1,
         },
         mcp_servers: vec![],
         session_config: SessionConfig {
-            max_sessions: HIGH_SESSION_LIMIT, // High session limit
+            max_sessions: 10000, // High session limit
             session_timeout: Duration::from_secs(1800),
         },
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match high_throughput_config.validate() {
@@ -594,21 +567,19 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
                 repo: "microsoft/DialoGPT-small".to_string(), // Smaller model
                 filename: None,
             },
-            batch_size: MEDIUM_BATCH_SIZE, // Smaller batch
+            batch_size: 256, // Smaller batch
             use_hf_params: true,
-            verbose_logging: false,
         },
         queue_config: QueueConfig {
-            max_queue_size: DEFAULT_QUEUE_SIZE,
+            max_queue_size: 100,
             request_timeout: Duration::from_secs(30), // Tight timeout
             worker_threads: 1,
         },
         mcp_servers: vec![], // No MCP for minimal latency
         session_config: SessionConfig {
-            max_sessions: MODERATE_SESSION_LIMIT,
+            max_sessions: 1000,
             session_timeout: Duration::from_secs(600),
         },
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match low_latency_config.validate() {
@@ -623,21 +594,19 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
                 repo: "microsoft/DialoGPT-small".to_string(),
                 filename: None,
             },
-            batch_size: SMALL_BATCH_SIZE, // Small batch
+            batch_size: 128, // Small batch
             use_hf_params: true,
-            verbose_logging: false,
         },
         queue_config: QueueConfig {
-            max_queue_size: SMALL_QUEUE_SIZE, // Small queue
+            max_queue_size: 50, // Small queue
             request_timeout: Duration::from_secs(60),
             worker_threads: 1,
         },
         mcp_servers: vec![],
         session_config: SessionConfig {
-            max_sessions: SMALL_SESSION_LIMIT, // Low session count
+            max_sessions: 100, // Low session count
             session_timeout: Duration::from_secs(300),
         },
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     match memory_efficient_config.validate() {

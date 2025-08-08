@@ -115,7 +115,6 @@ pub struct Session {
     pub messages: Vec<Message>,
     pub mcp_servers: Vec<MCPServerConfig>,
     pub available_tools: Vec<ToolDefinition>,
-    pub available_prompts: Vec<PromptDefinition>,
     pub created_at: SystemTime,
     pub updated_at: SystemTime,
 }
@@ -136,89 +135,7 @@ pub struct ToolDefinition {
     pub server_name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct PromptId(Ulid);
-
-impl PromptId {
-    pub fn new() -> Self {
-        Self(Ulid::new())
-    }
-
-    pub fn from_ulid(ulid: Ulid) -> Self {
-        Self(ulid)
-    }
-
-    pub fn as_ulid(&self) -> Ulid {
-        self.0
-    }
-}
-
-impl std::fmt::Display for PromptId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::str::FromStr for PromptId {
-    type Err = ulid::DecodeError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(Ulid::from_string(s)?))
-    }
-}
-
-impl Default for PromptId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PromptDefinition {
-    pub name: String,
-    pub description: Option<String>,
-    pub arguments: Vec<PromptArgument>,
-    pub server_name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PromptArgument {
-    pub name: String,
-    pub description: Option<String>,
-    pub required: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PromptMessage {
-    pub role: MessageRole,
-    pub content: PromptContent,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum PromptContent {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "image")]
-    Image { data: String, mime_type: String },
-    #[serde(rename = "resource")]
-    Resource { resource: PromptResource },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PromptResource {
-    pub uri: String,
-    pub text: Option<String>,
-    pub mime_type: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetPromptResult {
-    pub description: Option<String>,
-    pub messages: Vec<PromptMessage>,
-}
-
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 pub struct GenerationRequest {
     pub session: Session,
     pub max_tokens: Option<u32>,
@@ -258,89 +175,6 @@ pub struct ToolResult {
     pub error: Option<String>,
 }
 
-/// Represents different types of resources that tools might access
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ResourceType {
-    FileSystem(String), // Path pattern
-    Network(String),    // URL pattern
-    Database(String),   // Database/table name
-    Memory,             // In-memory operations
-    System,             // System-level operations
-    Other(String),      // Custom resource type
-}
-
-/// Defines what kind of access a tool has to a resource
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AccessType {
-    Read,
-    Write,
-    ReadWrite,
-    Execute,
-    Create,
-    Delete,
-}
-
-/// Describes a tool's resource access pattern
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourceAccess {
-    pub resource: ResourceType,
-    pub access_type: AccessType,
-    pub exclusive: bool, // Whether this resource requires exclusive access
-}
-
-/// Represents a potential conflict between two tool calls
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolConflict {
-    pub tool1: String,
-    pub tool2: String,
-    pub conflict_type: ConflictType,
-    pub description: String,
-}
-
-/// Types of conflicts that can occur between tools
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ConflictType {
-    ResourceConflict, // Both tools access same resource in conflicting ways
-    DataDependency,   // One tool depends on output from another
-    OrderDependency,  // Tools must execute in specific order
-    MutualExclusion,  // Tools cannot run simultaneously
-}
-
-/// Represents a reference in tool parameters to another tool's output
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParameterReference {
-    pub parameter_path: String,  // JSON path in parameters
-    pub referenced_tool: String, // Name of tool being referenced
-    pub reference_type: ReferenceType,
-}
-
-/// Types of parameter references
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ReferenceType {
-    DirectOutput,     // References the entire output
-    PropertyAccess,   // References a specific property of the output
-    ConditionalValue, // Value depends on output condition
-    FileSystemPath,   // References a file/directory created by another tool
-}
-
-/// Configuration for tool-specific parallel execution rules
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ParallelExecutionConfig {
-    pub tool_conflicts: Vec<ToolConflict>,
-    pub resource_access_patterns: std::collections::HashMap<String, Vec<ResourceAccess>>,
-    pub safe_parallel_groups: Vec<Vec<String>>, // Groups of tools that are safe to run in parallel
-    pub never_parallel: Vec<(String, String)>,  // Pairs of tools that should never run in parallel
-    pub dependency_rules: Vec<DependencyRule>,
-}
-
-/// Rules for tool dependencies
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DependencyRule {
-    pub pattern: String, // Regex pattern for parameter matching
-    pub dependency_type: ConflictType,
-    pub applies_to_tools: Vec<String>, // If empty, applies to all tools
-}
-
 #[derive(Debug)]
 pub struct StreamChunk {
     pub text: String,
@@ -354,7 +188,6 @@ pub struct AgentConfig {
     pub queue_config: QueueConfig,
     pub mcp_servers: Vec<MCPServerConfig>,
     pub session_config: SessionConfig,
-    pub parallel_execution_config: ParallelExecutionConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -362,7 +195,6 @@ pub struct ModelConfig {
     pub source: ModelSource,
     pub batch_size: u32,
     pub use_hf_params: bool,
-    pub verbose_logging: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -408,7 +240,6 @@ impl Default for ModelConfig {
             },
             batch_size: 512,
             use_hf_params: true,
-            verbose_logging: false,
         }
     }
 }
@@ -665,79 +496,79 @@ pub enum AgentError {
     #[error("Template processing error: {0}\n💡 Check message format and tool definitions are properly structured")]
     Template(#[from] TemplateError),
 
-    #[error("Request timeout: Operation took longer than {timeout:?}. Try reducing the request complexity or increasing the timeout value.")]
+    #[error("Request timeout: processing took longer than {timeout:?}\n💡 Increase timeout settings, reduce max_tokens, or check system performance")]
     Timeout { timeout: Duration },
 
-    #[error("Request queue full: Maximum capacity of {capacity} requests exceeded. Please wait for pending requests to complete or increase queue capacity.")]
+    #[error("Queue overloaded: {capacity} requests queued (max capacity)\n💡 Wait and retry, or increase max_queue_size configuration")]
     QueueFull { capacity: usize },
 }
 
 #[derive(Debug, Error)]
 pub enum ModelError {
-    #[error("Failed to load model: {0}\n\n💡 Troubleshooting steps:\n• Verify model format is .gguf (GGML Unified Format)\n• Check available system memory (models require 4-16GB typically)\n• Ensure model file is not corrupted (re-download if needed)\n• Try reducing batch_size to 512 or lower in configuration\n• Check disk space is sufficient for model loading")]
+    #[error("Model loading failed: {0}\n🔧 Check available memory (4-8GB needed), verify GGUF file integrity, ensure compatible llama.cpp version")]
     LoadingFailed(String),
 
-    #[error("Model not found: {0}\n\n💡 Please check:\n• Model file path exists and is readable\n• Filename matches exactly (case-sensitive)\n• File permissions allow read access (chmod 644)\n• For HuggingFace repos: verify repo name exists and model file is present\n• Use absolute paths to avoid relative path issues")]
+    #[error("Model not found: {0}\n📁 Verify file path is correct, file exists and is readable. For HuggingFace: check repo name and filename")]
     NotFound(String),
 
-    #[error("Invalid model configuration: {0}\n\n💡 Configuration requirements:\n• batch_size must be > 0 (recommended: 512-2048)\n• Model path must be absolute or relative to current directory\n• File extension must be .gguf\n• HuggingFace repo format: 'username/repo-name'\n• Ensure numeric values are within valid ranges")]
+    #[error("Invalid model config: {0}\n⚙️ Ensure batch_size > 0, valid model source path, and appropriate use_hf_params setting")]
     InvalidConfig(String),
 
-    #[error("Model inference failed: {0}\n\n💡 Possible causes:\n• Insufficient system memory or GPU memory\n• Model format incompatible with current version\n• Context length exceeds model's maximum (try reducing max_tokens)\n• Hardware acceleration (Metal/CUDA) unavailable\n• Concurrent requests exceeding system capacity")]
+    #[error("Model inference failed: {0}\n🦾 Check input format, model compatibility, and available system resources")]
     InferenceFailed(String),
 }
 
 #[derive(Debug, Clone, Error)]
 pub enum QueueError {
-    #[error("Request queue is full (all {capacity} slots occupied)\n\n💡 Options to resolve:\n• Wait a few seconds and retry your request\n• Increase max_queue_size in configuration (current: {capacity})\n• Reduce concurrent request load from clients\n• Check if requests are processing normally (monitor queue metrics)\n• Consider scaling to multiple workers")]
-    Full { capacity: usize },
+    #[error("Queue is full")]
+    Full,
 
-    #[error("Request timeout after {duration:?}\n\n💡 Suggestions to resolve:\n• Reduce max_tokens in the request (try < 1000)\n• Simplify the prompt or conversation context\n• Increase request_timeout in queue configuration\n• Check system resources (CPU/memory usage)\n• Monitor for memory leaks or resource exhaustion")]
-    Timeout { duration: Duration },
+    #[error("Request timeout")]
+    Timeout,
 
-    #[error("Processing error: {0}\n\n💡 Debugging steps:\n• Check detailed logs for complete stack trace\n• Verify model is properly loaded and accessible\n• Ensure sufficient system resources (memory, CPU)\n• Try with a simpler request to isolate the issue\n• Restart the service if errors persist")]
+    #[error("Worker thread error: {0}")]
     WorkerError(String),
 }
 
 #[derive(Debug, Error)]
 pub enum SessionError {
-    #[error("Session not found: {0}\n\n💡 The session may have expired or been removed. Create a new session to continue.")]
+    #[error("Session not found: {0}")]
     NotFound(String),
 
-    #[error("Session limit exceeded\n\n💡 Resolution options:\n• Close unused sessions before creating new ones\n• Increase maximum session limit in configuration\n• Implement session cleanup for inactive sessions\n• Check for session leaks in your application")]
+    #[error("Session limit exceeded")]
     LimitExceeded,
 
-    #[error("Session timed out due to inactivity\n\n💡 Create a new session to continue, or increase session timeout in configuration.")]
+    #[error("Session timeout")]
     Timeout,
 
-    #[error("Invalid session state: {0}\n\n💡 This may indicate corrupted session data. Try creating a fresh session.")]
+    #[error("Invalid session state: {0}")]
     InvalidState(String),
 }
 
 #[derive(Debug, Error)]
 pub enum MCPError {
-    #[error("MCP server '{0}' not found\n\n💡 Check server configuration:\n• Ensure server is properly initialized in config\n• Verify server process is running and accessible\n• Check network connectivity if using remote server\n• Validate server name matches configuration exactly")]
+    #[error("MCP server not found: {0}")]
     ServerNotFound(String),
 
-    #[error("Tool execution failed: {0}\n\n💡 Troubleshooting steps:\n• Verify tool arguments match expected schema\n• Ensure the MCP server is running and responsive\n• Check tool permissions and access rights\n• Review server logs for detailed error information\n• Test with simpler tool calls to isolate the issue")]
+    #[error("Tool call failed: {0}")]
     ToolCallFailed(String),
 
-    #[error("MCP server connection error: {0}\n\n💡 Check server status:\n• Verify server process is running\n• Check network connectivity and firewall settings\n• Ensure server is listening on correct port\n• Try restarting the MCP server")]
+    #[error("Connection error: {0}")]
     Connection(String),
 
-    #[error("MCP protocol error: {0}\n\n💡 This may indicate:\n• Incompatible MCP server version\n• Malformed request or response format\n• Server implementation issues\n• Network data corruption during transmission")]
+    #[error("Protocol error: {0}")]
     Protocol(String),
 }
 
 #[derive(Debug, Error)]
 pub enum TemplateError {
-    #[error("Template rendering failed: {0}\n\n💡 Check template issues:\n• Verify template syntax is valid\n• Ensure all required variables are provided\n• Check for missing or incorrect variable names\n• Review template logic for edge cases")]
+    #[error("Template rendering failed: {0}")]
     RenderingFailed(String),
 
-    #[error("Failed to parse tool calls: {0}\n\n💡 Tool call format issues:\n• Check JSON syntax in tool call requests\n• Verify function names match available tools\n• Ensure argument types match expected schema\n• Review generated text for malformed tool calls")]
+    #[error("Tool call parsing failed: {0}")]
     ToolCallParsing(String),
 
-    #[error("Invalid template format: {0}\n\n💡 Template syntax problems:\n• Verify template uses correct syntax\n• Check for unmatched brackets or quotes\n• Ensure proper variable substitution format\n• Test template with minimal data first")]
+    #[error("Invalid template: {0}")]
     Invalid(String),
 }
 
@@ -808,7 +639,6 @@ mod tests {
             messages: Vec::new(),
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
-            available_prompts: Vec::new(),
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         };
@@ -817,7 +647,6 @@ mod tests {
         assert!(session.messages.is_empty());
         assert!(session.mcp_servers.is_empty());
         assert!(session.available_tools.is_empty());
-        assert!(session.available_prompts.is_empty());
     }
 
     #[test]
@@ -857,7 +686,6 @@ mod tests {
             messages: Vec::new(),
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
-            available_prompts: Vec::new(),
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         };
@@ -1076,7 +904,6 @@ mod tests {
             },
             batch_size: 512,
             use_hf_params: true,
-            verbose_logging: false,
         };
 
         assert!(config.validate().is_ok());
@@ -1091,7 +918,6 @@ mod tests {
             },
             batch_size: 0,
             use_hf_params: true,
-            verbose_logging: false,
         };
 
         assert!(config.validate().is_err());
@@ -1103,7 +929,6 @@ mod tests {
             },
             batch_size: 10000,
             use_hf_params: true,
-            verbose_logging: false,
         };
 
         assert!(config.validate().is_err());

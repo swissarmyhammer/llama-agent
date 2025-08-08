@@ -1,5 +1,4 @@
 use crate::chat_template::ChatTemplateEngine;
-use crate::dependency_analysis::{DependencyAnalyzer, ParallelExecutionDecision};
 use crate::mcp::MCPClient;
 use crate::model::ModelManager;
 use crate::queue::RequestQueue;
@@ -22,7 +21,6 @@ pub struct AgentServer {
     session_manager: Arc<SessionManager>,
     mcp_client: Arc<MCPClient>,
     chat_template: Arc<ChatTemplateEngine>,
-    dependency_analyzer: DependencyAnalyzer,
     config: AgentConfig,
     start_time: Instant,
     shutdown_token: tokio_util::sync::CancellationToken,
@@ -37,16 +35,6 @@ impl std::fmt::Debug for AgentServer {
     }
 }
 
-impl Drop for AgentServer {
-    fn drop(&mut self) {
-        // If shutdown wasn't called explicitly, at least cancel the shutdown token
-        if !self.shutdown_token.is_cancelled() {
-            warn!("AgentServer dropped without explicit shutdown - resources may not be cleaned up properly");
-            self.shutdown_token.cancel();
-        }
-    }
-}
-
 impl AgentServer {
     pub fn new(
         model_manager: Arc<ModelManager>,
@@ -56,15 +44,12 @@ impl AgentServer {
         chat_template: Arc<ChatTemplateEngine>,
         config: AgentConfig,
     ) -> Self {
-        let dependency_analyzer = DependencyAnalyzer::new(config.parallel_execution_config.clone());
-
         Self {
             model_manager,
             request_queue,
             session_manager,
             mcp_client,
             chat_template,
-            dependency_analyzer,
             config,
             start_time: Instant::now(),
             shutdown_token: tokio_util::sync::CancellationToken::new(),
@@ -76,298 +61,48 @@ impl AgentServer {
     }
 
     pub async fn shutdown(self) -> Result<(), AgentError> {
-        info!("Initiating AgentServer graceful shutdown");
-        let shutdown_start = std::time::Instant::now();
+        info!("Initiating AgentServer shutdown");
+        let shutdown_start = Instant::now();
 
         // Signal shutdown to all components
         self.shutdown_token.cancel();
 
-        // Create shutdown timeout to prevent hanging
-        let shutdown_timeout = tokio::time::Duration::from_secs(30);
-        let result = tokio::time::timeout(shutdown_timeout, async {
-            // 1. Stop accepting new requests by gracefully shutting down the queue
-            info!("Shutting down request queue...");
-            // Note: We would need to modify RequestQueue to implement proper shutdown
-            // For now, just drain any pending work by waiting briefly
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Graceful shutdown with timeouts
+        let shutdown_timeout = std::time::Duration::from_secs(30);
 
-            // 2. Clean up sessions
-            info!("Cleaning up active sessions...");
-            let session_count = self.session_manager.get_session_count().await;
-            if session_count > 0 {
-                info!("Found {} active sessions during shutdown", session_count);
-                // Sessions will be cleaned up automatically when SessionManager is dropped
+        // Shutdown MCP client first with timeout
+        info!("Shutting down MCP client...");
+        let mcp_shutdown = async { self.mcp_client.shutdown_all().await };
+
+        match tokio::time::timeout(shutdown_timeout, mcp_shutdown).await {
+            Ok(result) => result?,
+            Err(_) => {
+                warn!("MCP client shutdown timed out after {:?}", shutdown_timeout);
             }
+        }
 
-            // 3. Shutdown MCP client connections
-            info!("Shutting down MCP connections...");
-            self.mcp_client.shutdown_all().await?;
-
-            // 4. Final cleanup and resource reporting
-            let shutdown_time = shutdown_start.elapsed();
-            info!(
-                "AgentServer shutdown completed successfully in {:?}",
-                shutdown_time
+        // Wait for queue to finish current requests with timeout
+        info!("Waiting for request queue to drain...");
+        let queue_stats = self.request_queue.get_stats();
+        if queue_stats.current_queue_size > 0 {
+            warn!(
+                "Shutting down with {} requests still in queue",
+                queue_stats.current_queue_size
             );
 
-            Ok::<(), AgentError>(())
-        })
-        .await;
-
-        match result {
-            Ok(Ok(())) => {
-                info!("Graceful shutdown completed");
-                Ok(())
-            }
-            Ok(Err(e)) => {
-                error!("Error during shutdown: {}", e);
-                Err(e)
-            }
-            Err(_timeout) => {
-                warn!(
-                    "Shutdown timed out after {:?}, forcing exit",
-                    shutdown_timeout
-                );
-                // Force cleanup - this is not ideal but prevents hanging
-                Ok(())
-            }
-        }
-    }
-
-    /// Check if text contains excessive repetition (potential DoS attack)
-    fn has_excessive_repetition(text: &str) -> bool {
-        if text.len() < 100 {
-            return false;
+            // Give some time for current requests to complete
+            let drain_timeout = std::time::Duration::from_secs(10);
+            tokio::time::sleep(drain_timeout).await;
         }
 
-        let chars: Vec<char> = text.chars().collect();
-        let mut repetition_count = 0;
-        let window_size = 50; // Check 50-character windows
+        // Force shutdown of remaining components
+        info!("Forcing shutdown of remaining components...");
 
-        for i in 0..(chars.len().saturating_sub(window_size * 2)) {
-            let pattern = &chars[i..i + window_size];
-            let next_window = &chars[i + window_size..i + window_size * 2];
-
-            if pattern == next_window {
-                repetition_count += 1;
-                if repetition_count > 5 {
-                    // Allow some repetition but not excessive
-                    return true;
-                }
-            } else {
-                repetition_count = 0;
-            }
-        }
-
-        false
-    }
-
-    /// Validate generation request for security and correctness
-    fn validate_generation_request(&self, request: &GenerationRequest) -> Result<(), AgentError> {
-        // 1. Validate token limits with security bounds
-        if let Some(max_tokens) = request.max_tokens {
-            if max_tokens == 0 {
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "max_tokens must be greater than 0".to_string(),
-                )));
-            }
-            if max_tokens > 32768 {
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    format!("max_tokens {} exceeds security limit of 32768", max_tokens),
-                )));
-            }
-            if max_tokens > 8192 {
-                warn!("Large token request: {} tokens requested", max_tokens);
-                // Allow but warn about large requests
-            }
-        }
-
-        // 2. Validate temperature range with finite check
-        if let Some(temperature) = request.temperature {
-            if !temperature.is_finite() {
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "temperature must be a finite number".to_string(),
-                )));
-            }
-            if !(0.0..=2.0).contains(&temperature) {
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    format!("temperature {} must be between 0.0 and 2.0", temperature),
-                )));
-            }
-        }
-
-        // 3. Validate top_p range with finite check
-        if let Some(top_p) = request.top_p {
-            if !top_p.is_finite() {
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "top_p must be a finite number".to_string(),
-                )));
-            }
-            if !(0.0..=1.0).contains(&top_p) {
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    format!("top_p {} must be between 0.0 and 1.0", top_p),
-                )));
-            }
-        }
-
-        // 4. Validate session content size
-        let total_content_size: usize = request
-            .session
-            .messages
-            .iter()
-            .map(|m| m.content.len())
-            .sum();
-
-        if total_content_size > 1_000_000 {
-            // 1MB limit
-            return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                "session content exceeds maximum size limit".to_string(),
-            )));
-        }
-
-        // 5. Validate stop tokens with security limits
-        if request.stop_tokens.len() > 20 {
-            return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                format!(
-                    "too many stop tokens: {} (maximum 20 allowed)",
-                    request.stop_tokens.len()
-                ),
-            )));
-        }
-
-        for stop_token in &request.stop_tokens {
-            if stop_token.is_empty() {
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "stop tokens cannot be empty".to_string(),
-                )));
-            }
-            if stop_token.len() > 100 {
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    format!("stop token '{}' exceeds 100 character limit", stop_token),
-                )));
-            }
-        }
-
-        // 6. Validate message content for potential injection
-        for message in &request.session.messages {
-            if message.content.len() > 100_000 {
-                // 100KB per message
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "individual message exceeds size limit".to_string(),
-                )));
-            }
-
-            // Enhanced security validation - check for suspicious patterns
-            if message.content.contains('\0') {
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "message content contains null bytes".to_string(),
-                )));
-            }
-
-            // Check for potential prompt injection patterns
-            let content_lower = message.content.to_lowercase();
-            let suspicious_patterns = [
-                // Prompt injection patterns
-                "ignore previous instructions",
-                "disregard all",
-                "forget everything",
-                "new instructions:",
-                "system:",
-                "assistant:",
-                "you are now",
-                "pretend to be",
-                // Code injection patterns
-                "<script",
-                "</script>",
-                "javascript:",
-                "eval(",
-                "exec(",
-                "subprocess",
-                "__import__",
-                "os.system",
-                "shell_exec",
-                // Path traversal patterns
-                "../",
-                "..\\",
-                "/etc/passwd",
-                "c:\\windows\\system32",
-                // XSS patterns
-                "onload=",
-                "onerror=",
-                "onclick=",
-                "document.cookie",
-            ];
-
-            for pattern in &suspicious_patterns {
-                if content_lower.contains(pattern) {
-                    warn!(
-                        "Potentially suspicious content detected in message: contains '{}'",
-                        pattern
-                    );
-                    // Log but don't block - allow legitimate use cases
-                    debug!(
-                        "Full message content (first 200 chars): {}",
-                        &message.content.chars().take(200).collect::<String>()
-                    );
-                }
-            }
-
-            // Check for excessive repetition (potential DoS attempt)
-            if Self::has_excessive_repetition(&message.content) {
-                warn!("Message contains excessive repetition - potential DoS attempt");
-                return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                    "message contains excessive repetition".to_string(),
-                )));
-            }
-        }
-
-        // 7. Additional security validation
-        self.validate_security_limits(request)?;
-
-        Ok(())
-    }
-
-    /// Additional security validation for resource limits
-    fn validate_security_limits(&self, request: &GenerationRequest) -> Result<(), AgentError> {
-        // 1. Check for potential DoS through large context windows
-        let context_tokens = request.session.messages.len() * 50; // Rough estimate
-        if context_tokens > 100_000 {
-            return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                format!(
-                    "estimated context size {} tokens exceeds security limit",
-                    context_tokens
-                ),
-            )));
-        }
-
-        // 2. Validate session has reasonable message count
-        if request.session.messages.len() > 1000 {
-            return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                format!(
-                    "session message count {} exceeds limit of 1000",
-                    request.session.messages.len()
-                ),
-            )));
-        }
-
-        // 3. Check for potential memory exhaustion attacks
-        let total_request_size = serde_json::to_string(request)
-            .map_err(|_| {
-                AgentError::Template(crate::types::TemplateError::Invalid(
-                    "failed to serialize request for security validation".to_string(),
-                ))
-            })?
-            .len();
-
-        if total_request_size > 5_000_000 {
-            // 5MB limit for entire request
-            return Err(AgentError::Template(crate::types::TemplateError::Invalid(
-                format!(
-                    "request size {} bytes exceeds security limit of 5MB",
-                    total_request_size
-                ),
-            )));
-        }
+        let shutdown_duration = shutdown_start.elapsed();
+        info!(
+            "AgentServer shutdown completed in {:?} (Final stats: {} completed, {} failed)",
+            shutdown_duration, queue_stats.completed_requests, queue_stats.failed_requests
+        );
 
         Ok(())
     }
@@ -378,32 +113,7 @@ impl AgentServer {
         tool_call: &ToolCall,
         tool_def: &crate::types::ToolDefinition,
     ) -> Result<(), String> {
-        // Security check: validate tool name format
-        if tool_call.name.is_empty() || tool_call.name.len() > 100 {
-            return Err("Tool name must be 1-100 characters".to_string());
-        }
-
-        // Check for potentially dangerous tool names
-        let dangerous_patterns = [
-            "exec",
-            "eval",
-            "system",
-            "shell",
-            "cmd",
-            "powershell",
-            "bash",
-        ];
-        for pattern in &dangerous_patterns {
-            if tool_call.name.to_lowercase().contains(pattern) {
-                warn!(
-                    "Potentially dangerous tool call detected: {}",
-                    tool_call.name
-                );
-                // Log but allow - some legitimate tools might match
-            }
-        }
-
-        // If no parameters schema is defined, skip schema validation
+        // If no parameters schema is defined, skip validation
         if tool_def.parameters.is_null() {
             debug!("No parameter schema defined for tool '{}'", tool_call.name);
             return Ok(());
@@ -414,62 +124,42 @@ impl AgentServer {
             return Err("Tool requires arguments but none provided".to_string());
         }
 
-        // Security validation of argument content
-        if let Ok(args_str) = serde_json::to_string(&tool_call.arguments) {
-            // Check argument size
-            if args_str.len() > 10_000 {
-                // 10KB limit
-                return Err("Tool arguments exceed maximum size limit".to_string());
-            }
-
-            // Check for suspicious content in arguments
-            let args_lower = args_str.to_lowercase();
-            let suspicious_args = [
-                "../",
-                "..\\",
-                "/etc/",
-                "c:\\windows",
-                "rm -rf",
-                "del /",
-                "format c:",
-            ];
-            for pattern in &suspicious_args {
-                if args_lower.contains(pattern) {
-                    warn!(
-                        "Suspicious content in tool arguments for '{}': contains '{}'",
-                        tool_call.name, pattern
-                    );
-                    // Log suspicious content but continue - might be legitimate
-                }
-            }
-        }
+        // Additional validation could be added here:
+        // - JSON Schema validation against tool_def.parameters
+        // - Type checking for required fields
+        // - Range validation for numeric parameters
 
         debug!(
-            "Tool arguments validation passed for '{}' (enhanced security checks applied)",
+            "Tool arguments validation passed for '{}' (basic validation only)",
             tool_call.name
         );
         Ok(())
     }
 
-    /// Determine if tool calls should be executed in parallel using sophisticated dependency analysis
+    /// Determine if tool calls should be executed in parallel
     fn should_execute_in_parallel(&self, tool_calls: &[ToolCall]) -> bool {
-        let decision = self
-            .dependency_analyzer
-            .analyze_parallel_execution(tool_calls);
+        // Simple heuristic: execute in parallel if there are multiple calls
+        // and they don't appear to be interdependent
 
-        match decision {
-            ParallelExecutionDecision::Parallel => {
-                debug!("Dependency analysis determined parallel execution is safe");
-                true
-            }
-            ParallelExecutionDecision::Sequential(reason) => {
-                debug!(
-                    "Dependency analysis determined sequential execution required: {}",
-                    reason
-                );
-                false
+        // For now, enable parallel execution for most cases
+        // TODO: Add more sophisticated dependency analysis
+        if tool_calls.len() <= 1 {
+            return false;
+        }
+
+        // Check for potential dependencies by looking for similar tool names
+        // that might modify the same resources
+        let mut tool_names = std::collections::HashSet::new();
+        for tool_call in tool_calls {
+            // If we have duplicate tool names, they might be interdependent
+            if !tool_names.insert(&tool_call.name) {
+                debug!("Detected duplicate tool names, using sequential execution for safety");
+                return false;
             }
         }
+
+        debug!("No obvious dependencies detected, enabling parallel execution");
+        true
     }
 
     /// Execute multiple tool calls in parallel
@@ -613,6 +303,176 @@ impl AgentServer {
             .await?
             .map_err(AgentError::Template)
     }
+
+    /// Comprehensive security validation for generation requests
+    fn validate_generation_request(&self, request: &GenerationRequest) -> Result<(), AgentError> {
+        // Validate session has messages
+        if request.session.messages.is_empty() {
+            return Err(AgentError::Session(
+                crate::types::SessionError::InvalidState(
+                    "Session must have at least one message for generation".to_string(),
+                ),
+            ));
+        }
+
+        // Security: Validate message content length and content
+        for (i, message) in request.session.messages.iter().enumerate() {
+            // DoS protection: limit message size
+            if message.content.len() > 100_000 {
+                return Err(AgentError::Session(
+                    crate::types::SessionError::InvalidState(format!(
+                        "Message {} exceeds maximum length of 100KB (current: {}KB)",
+                        i,
+                        message.content.len() / 1000
+                    )),
+                ));
+            }
+
+            // Security: Check for potentially malicious content patterns
+            if Self::contains_suspicious_content(&message.content) {
+                warn!("Blocking message {} with suspicious content patterns", i);
+                return Err(AgentError::Session(
+                    crate::types::SessionError::InvalidState(
+                        "Message contains potentially unsafe content patterns".to_string(),
+                    ),
+                ));
+            }
+
+            // Security: Check for excessive repetition (could indicate spam/DoS)
+            if Self::has_excessive_repetition(&message.content) {
+                warn!("Blocking message {} with excessive repetition", i);
+                return Err(AgentError::Session(
+                    crate::types::SessionError::InvalidState(
+                        "Message contains excessive repetition patterns".to_string(),
+                    ),
+                ));
+            }
+        }
+
+        // Security: Validate generation parameters with bounds
+        if let Some(max_tokens) = request.max_tokens {
+            if max_tokens == 0 {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    "max_tokens must be greater than 0".to_string(),
+                )));
+            }
+            if max_tokens > 32_768 {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    format!(
+                        "max_tokens exceeds security limit of 32K (requested: {})",
+                        max_tokens
+                    ),
+                )));
+            }
+        }
+
+        // Validate temperature with security bounds
+        if let Some(temp) = request.temperature {
+            if !temp.is_finite() {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    "temperature must be a finite number".to_string(),
+                )));
+            }
+            if !(0.0..=2.0).contains(&temp) {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    format!("temperature must be between 0.0 and 2.0 (got: {})", temp),
+                )));
+            }
+        }
+
+        // Validate top_p with security bounds
+        if let Some(top_p) = request.top_p {
+            if !top_p.is_finite() {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    "top_p must be a finite number".to_string(),
+                )));
+            }
+            if !(0.0..=1.0).contains(&top_p) {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    format!("top_p must be between 0.0 and 1.0 (got: {})", top_p),
+                )));
+            }
+        }
+
+        // Security: Validate stop tokens
+        if request.stop_tokens.len() > 20 {
+            return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                format!(
+                    "Too many stop tokens: {} (max 20 allowed)",
+                    request.stop_tokens.len()
+                ),
+            )));
+        }
+
+        for (i, stop_token) in request.stop_tokens.iter().enumerate() {
+            if stop_token.len() > 100 {
+                return Err(AgentError::Queue(crate::types::QueueError::WorkerError(
+                    format!("Stop token {} exceeds maximum length of 100 chars", i),
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check for potentially suspicious content patterns
+    fn contains_suspicious_content(content: &str) -> bool {
+        let suspicious_patterns = [
+            "<script",
+            "</script>",
+            "javascript:",
+            "eval(",
+            "function(",
+            "${{",
+            "}}",
+            "<%",
+            "%>",
+            "<?php",
+            "?>",
+            "rm -rf",
+            "DELETE FROM",
+            "DROP TABLE",
+            "INSERT INTO",
+            "../../../",
+            "..\\..\\..\\", // Path traversal
+        ];
+
+        let content_lower = content.to_lowercase();
+        suspicious_patterns
+            .iter()
+            .any(|pattern| content_lower.contains(pattern))
+    }
+
+    /// Check for excessive repetition that might indicate spam/DoS
+    fn has_excessive_repetition(content: &str) -> bool {
+        if content.len() < 100 {
+            return false; // Short content is fine
+        }
+
+        // Check for repeated substrings
+        let chars: Vec<char> = content.chars().collect();
+        let len = chars.len();
+
+        // Check for repeated 4-char patterns
+        if len >= 20 {
+            for i in 0..=(len - 20) {
+                let pattern = &chars[i..i + 4];
+                let mut count = 1;
+
+                for j in ((i + 4)..=(len - 4)).step_by(4) {
+                    if &chars[j..j + 4] == pattern {
+                        count += 1;
+                        if count >= 5 {
+                            // 5+ repetitions of 4-char pattern
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
 }
 
 #[async_trait]
@@ -671,7 +531,7 @@ impl AgentAPI for AgentServer {
             request.session.id
         );
 
-        // Security validation: Check request parameters
+        // Security: Validate input before processing
         self.validate_generation_request(&request)?;
 
         let mut working_session = request.session.clone();
@@ -800,7 +660,7 @@ impl AgentAPI for AgentServer {
             request.session.id
         );
 
-        // Security validation: Check request parameters
+        // Security: Validate input before processing
         self.validate_generation_request(&request)?;
 
         // Render session to prompt
@@ -980,9 +840,7 @@ impl AgentAPI for AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{
-        ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
-    };
+    use crate::types::{ModelConfig, ModelSource, QueueConfig, SessionConfig};
 
     fn create_test_config() -> AgentConfig {
         use tempfile::TempDir;
@@ -996,12 +854,10 @@ mod tests {
                 },
                 batch_size: 512,
                 use_hf_params: false,
-                verbose_logging: false,
             },
             queue_config: QueueConfig::default(),
             mcp_servers: Vec::new(),
             session_config: SessionConfig::default(),
-            parallel_execution_config: ParallelExecutionConfig::default(),
         }
     }
 
@@ -1063,7 +919,6 @@ mod tests {
             },
             batch_size: 512,
             use_hf_params: false,
-            verbose_logging: false,
         };
 
         let valid_config = AgentConfig {
@@ -1071,7 +926,6 @@ mod tests {
             queue_config: QueueConfig::default(),
             mcp_servers: Vec::new(),
             session_config: SessionConfig::default(),
-            parallel_execution_config: ParallelExecutionConfig::default(),
         };
 
         // This should pass all validation except for the model file not existing

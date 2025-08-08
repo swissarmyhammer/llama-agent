@@ -10,7 +10,7 @@ use llama_agent::{
     chat_template::ChatTemplateEngine,
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
+        MessageRole, ModelConfig, ModelSource, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -32,7 +32,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             batch_size: 512,
             use_hf_params: true,
-            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: 100,
@@ -49,7 +48,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout_secs: None,
         }],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     let agent = AgentServer::initialize(config).await?;
@@ -191,7 +189,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("  Messages in session: {}", session.messages.len());
                 }
                 Err(e) => {
-                    println!("❌ Could not extract tool calls from response: {}", e);
+                    warn!("Failed to extract tool calls: {}", e);
+                    println!("Could not extract tool calls from response: {}", e);
                     println!("Raw response: {}", response.generated_text);
                 }
             }

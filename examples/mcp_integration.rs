@@ -11,7 +11,7 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
+        MessageRole, ModelConfig, ModelSource, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -34,7 +34,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             batch_size: 512,
             use_hf_params: true,
-            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: 100,
@@ -74,7 +73,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         ],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     println!("Initializing AgentServer with multiple MCP servers...");
@@ -98,7 +96,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     batch_size: 512,
                     use_hf_params: true,
-                    verbose_logging: false,
                 },
                 queue_config: QueueConfig {
                     max_queue_size: 100,
@@ -115,7 +112,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     timeout_secs: Some(30),
                 }],
                 session_config: SessionConfig::default(),
-                parallel_execution_config: ParallelExecutionConfig::default(),
             };
 
             AgentServer::initialize(fallback_config).await?
@@ -196,6 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
         Err(e) => {
+            warn!("Example 1 failed: {}", e);
             println!("❌ Example 1 failed: {}", e);
         }
     }
@@ -238,6 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
         Err(e) => {
+            warn!("Example 2 failed: {}", e);
             println!("❌ Example 2 failed: {}", e);
         }
     }
@@ -332,60 +330,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Demonstrate custom MCP server concepts
-    demonstrate_custom_mcp_server().await?;
-
     println!("\n✓ MCP integration example completed successfully");
     info!("MCP integration example completed");
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn demonstrate_custom_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
-    println!("\nCustom MCP Server Integration Guide");
-    println!("{}", "-".repeat(40));
-    println!("Here's how to create and integrate a custom MCP server:");
+    println!("Custom MCP Server Integration Example");
+    println!("This would show how to create and integrate a custom MCP server");
 
-    println!("\n1. Define your custom MCP server configuration:");
-    println!("```rust");
-    println!("let custom_config = MCPServerConfig {{");
-    println!("    name: \"custom-calculator\".to_string(),");
-    println!("    command: \"python3\".to_string(),");
-    println!("    args: vec![\"custom_mcp_server.py\".to_string()],");
-    println!("    timeout_secs: Some(30),");
-    println!("}};");
-    println!("```");
+    // This is a conceptual example of how you might configure a custom MCP server
+    let _custom_config = MCPServerConfig {
+        name: "custom-calculator".to_string(),
+        command: "python3".to_string(),
+        args: vec!["custom_mcp_server.py".to_string()],
+        timeout_secs: Some(30),
+    };
 
-    println!("\n2. Example Python MCP server implementation:");
-    println!("```python");
-    println!("#!/usr/bin/env python3");
-    println!("# custom_mcp_server.py");
-    println!("import json");
-    println!("import sys");
-    println!();
-    println!("def handle_tool_call(tool_name, parameters):");
-    println!("    if tool_name == 'calculate':");
-    println!("        expression = parameters.get('expression')");
-    println!("        try:");
-    println!("            result = eval(expression)  # Note: Use safely in production!");
-    println!("            return {{\"result\": result}}");
-    println!("        except Exception as e:");
-    println!("            return {{\"error\": str(e)}}");
-    println!("    return {{\"error\": \"Unknown tool\"}}");
-    println!("```");
-
-    println!("\n3. Integration examples for different domains:");
-    println!("• **Database Tools**: Query databases, run analytics");
-    println!("• **API Integration**: Call external services, webhooks");
-    println!("• **File Operations**: Process files, generate reports");
-    println!("• **Custom Computations**: Domain-specific calculations");
-    println!("• **System Operations**: Monitor resources, manage processes");
-
-    println!("\n4. Best practices:");
-    println!("• Always validate inputs from the LLM");
-    println!("• Implement proper error handling and timeouts");
-    println!("• Use appropriate security measures (sandboxing, permissions)");
-    println!("• Provide clear tool descriptions for the LLM");
-    println!("• Log operations for debugging and auditing");
+    println!("Custom MCP server would provide specialized tools for your domain");
+    println!("Examples: database queries, API calls, custom computations, etc.");
 
     Ok(())
 }

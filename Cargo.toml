@@ -88,8 +88,6 @@ overflow-checks = true
 [profile.test]
 opt-level = 1
 debug = true
-
-
 # Examples
 [[example]]
 name = "basic_usage"
@@ -116,6 +114,5 @@ name = "performance_examples"
 path = "examples/performance_examples.rs"
 
 [[example]]
-
 name = "integration_tests"
 path = "examples/integration_tests.rs"

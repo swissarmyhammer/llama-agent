@@ -7,13 +7,13 @@ use futures::StreamExt;
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, GenerationRequest, Message, MessageRole, ModelConfig, ModelSource,
-        ParallelExecutionConfig, QueueConfig, SessionConfig,
+        QueueConfig, SessionConfig,
     },
     AgentServer,
 };
 use std::io::{self, Write};
 use std::time::{Duration, SystemTime};
-use tracing::info;
+use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,7 +31,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             batch_size: 512,
             use_hf_params: true,
-            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: 100,
@@ -40,7 +39,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         mcp_servers: vec![], // No MCP servers for this example
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     println!("Initializing agent for streaming...");
@@ -99,7 +97,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Err(e) => {
-                println!("\n❌ Streaming error: {}", e);
+                warn!("Streaming error: {}", e);
+                println!("\nStreaming error: {}", e);
                 break;
             }
         }
