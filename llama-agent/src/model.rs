@@ -233,10 +233,14 @@ impl ModelManager {
 
         info!("Downloading model file: {}", target_filename);
 
-        // Download the model file with retry logic
-        let model_path = self
-            .download_model_file_with_retry(&repo_api, &target_filename, repo)
-            .await?;
+        // Download the model file(s) with retry logic
+        let model_path = if let Some(parts) = self.get_all_parts(&target_filename) {
+            info!("Downloading multi-part model with {} parts", parts.len());
+            self.download_multi_part_model(&repo_api, &parts, repo).await?
+        } else {
+            self.download_model_file_with_retry(&repo_api, &target_filename, repo)
+                .await?
+        };
 
         info!("Model downloaded to: {}", model_path.display());
 
@@ -305,6 +309,34 @@ impl ModelManager {
                 }
             }
         }
+    }
+
+    /// Downloads all parts of a multi-part model
+    async fn download_multi_part_model(
+        &self,
+        repo_api: &hf_hub::api::tokio::ApiRepo,
+        parts: &[String],
+        repo: &str,
+    ) -> Result<PathBuf, ModelError> {
+        info!("Starting download of {} parts for multi-part model", parts.len());
+        
+        let mut downloaded_paths = Vec::new();
+        
+        // Download each part
+        for (index, part) in parts.iter().enumerate() {
+            info!("Downloading part {} of {}: {}", index + 1, parts.len(), part);
+            
+            let path = self
+                .download_model_file_with_retry(repo_api, part, repo)
+                .await?;
+                
+            downloaded_paths.push(path);
+        }
+        
+        info!("Successfully downloaded all {} parts", parts.len());
+        
+        // Return the path to the first part (which llama.cpp uses to load multi-part files)
+        Ok(downloaded_paths[0].clone())
     }
 
     /// Determines if an error is retriable based on the error message
@@ -410,16 +442,31 @@ impl ModelManager {
                     }
                 }
 
-                // Prioritize BF16 files
+                // Prioritize BF16 files - check for multi-part files first
                 if !bf16_files.is_empty() {
-                    info!("Found BF16 model file: {}", bf16_files[0]);
-                    return Ok(bf16_files[0].clone());
+                    // Sort to ensure consistent ordering
+                    bf16_files.sort();
+                    
+                    // Check if this is a multi-part file
+                    if let Some(base_filename) = self.detect_multi_part_base(&bf16_files[0]) {
+                        info!("Found multi-part BF16 model file: {}", base_filename);
+                        return Ok(base_filename);
+                    } else {
+                        info!("Found BF16 model file: {}", bf16_files[0]);
+                        return Ok(bf16_files[0].clone());
+                    }
                 }
 
                 // Fallback to first GGUF file
                 if !gguf_files.is_empty() {
-                    info!("Found GGUF model file: {}", gguf_files[0]);
-                    return Ok(gguf_files[0].clone());
+                    gguf_files.sort();
+                    if let Some(base_filename) = self.detect_multi_part_base(&gguf_files[0]) {
+                        info!("Found multi-part GGUF model file: {}", base_filename);
+                        return Ok(base_filename);
+                    } else {
+                        info!("Found GGUF model file: {}", gguf_files[0]);
+                        return Ok(gguf_files[0].clone());
+                    }
                 }
 
                 Err(ModelError::NotFound(format!(
@@ -430,6 +477,50 @@ impl ModelManager {
                 "Failed to get repository info: {}",
                 e
             ))),
+        }
+    }
+
+    /// Detects if a filename is part of a multi-part GGUF file and returns the base filename (first part)
+    fn detect_multi_part_base(&self, filename: &str) -> Option<String> {
+        // Check for pattern like "model-00001-of-00002.gguf"
+        use regex::Regex;
+        let re = Regex::new(r"^(.+)-(\d{5})-of-(\d{5})\.gguf$").ok()?;
+        
+        if let Some(captures) = re.captures(filename) {
+            let base_name = captures.get(1)?.as_str();
+            let current_part = captures.get(2)?.as_str();
+            let total_parts = captures.get(3)?.as_str();
+            
+            info!(
+                "Detected multi-part GGUF file: {} (part {} of {})",
+                base_name, current_part, total_parts
+            );
+            
+            // Return the first part filename pattern
+            Some(format!("{}-00001-of-{}.gguf", base_name, total_parts))
+        } else {
+            None
+        }
+    }
+
+    /// Gets all parts of a multi-part GGUF file
+    fn get_all_parts(&self, base_filename: &str) -> Option<Vec<String>> {
+        use regex::Regex;
+        let re = Regex::new(r"^(.+)-00001-of-(\d{5})\.gguf$").ok()?;
+        
+        if let Some(captures) = re.captures(base_filename) {
+            let base_name = captures.get(1)?.as_str();
+            let total_parts_str = captures.get(2)?.as_str();
+            let total_parts: u32 = total_parts_str.parse().ok()?;
+            
+            let mut parts = Vec::new();
+            for part_num in 1..=total_parts {
+                parts.push(format!("{}-{:05}-of-{}.gguf", base_name, part_num, total_parts_str));
+            }
+            
+            Some(parts)
+        } else {
+            None
         }
     }
 
