@@ -8,10 +8,36 @@ use llama_cpp_2::{
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
+// Need access to raw FFI bindings for llama_log_set
+use std::ffi::c_void;
+use std::os::raw::c_char;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 static GLOBAL_BACKEND: OnceLock<Arc<LlamaBackend>> = OnceLock::new();
+
+// Null log callback to suppress llama.cpp verbose output
+extern "C" fn null_log_callback(_level: i32, _text: *const c_char, _user_data: *mut c_void) {
+    // Do nothing - this suppresses all llama.cpp logging
+}
+
+// Set up logging suppression using llama_log_set
+fn set_logging_suppression(suppress: bool) {
+    unsafe {
+        // Access the raw FFI binding
+        extern "C" {
+            fn llama_log_set(log_callback: Option<extern "C" fn(i32, *const c_char, *mut c_void)>, user_data: *mut c_void);
+        }
+
+        if suppress {
+            // Set null callback to suppress logging
+            llama_log_set(Some(null_log_callback), std::ptr::null_mut());
+        } else {
+            // Restore default logging (NULL callback means output to stderr)
+            llama_log_set(None, std::ptr::null_mut());
+        }
+    }
+}
 
 pub struct ModelManager {
     model: Arc<RwLock<Option<LlamaModel>>>,
@@ -85,12 +111,16 @@ impl ModelManager {
         // Load model based on source type with progress indication
         let model = match &self.config.source {
             ModelSource::HuggingFace { repo, filename } => {
-                info!("Starting HuggingFace model download/loading for: {}", repo);
+                if self.config.verbose_logging {
+                    info!("Starting HuggingFace model download/loading for: {}", repo);
+                }
                 self.load_huggingface_model(repo, filename.as_deref())
                     .await?
             }
             ModelSource::Local { folder, filename } => {
-                info!("Loading local model from: {}", folder.display());
+                if self.config.verbose_logging {
+                    info!("Loading local model from: {}", folder.display());
+                }
                 self.load_local_model(folder, filename.as_deref()).await?
             }
         };
@@ -199,14 +229,28 @@ impl ModelManager {
             .with_embeddings(false) // Disable embeddings for inference-only mode
             .with_offload_kqv(true); // Enable KQV offloading for memory optimization
 
-        debug!(
-            "Creating context with optimized parameters for batch_size={}",
-            self.config.batch_size
-        );
+        if self.config.verbose_logging {
+            debug!(
+                "Creating context with optimized parameters for batch_size={}",
+                self.config.batch_size
+            );
+        }
 
-        model
+        // Set logging suppression for context creation if verbose logging is disabled
+        if !self.config.verbose_logging {
+            set_logging_suppression(true);
+        }
+
+        let result = model
             .new_context(&self.backend, context_params)
-            .map_err(move |e| ModelError::LoadingFailed(format!("Failed to create context: {}", e)))
+            .map_err(move |e| ModelError::LoadingFailed(format!("Failed to create context: {}", e)));
+
+        // Restore default logging after context creation
+        if !self.config.verbose_logging {
+            set_logging_suppression(false);
+        }
+
+        result
     }
 
     async fn load_huggingface_model(
@@ -336,17 +380,26 @@ impl ModelManager {
 
         // Optimize model loading with performance parameters
         let model_params = LlamaModelParams::default();
-        info!("⚙️  Loading model with optimized parameters (memory mapping enabled)");
-        info!("📁 Model file: {}", model_path.display());
+        if self.config.verbose_logging {
+            info!("⚙️  Loading model with optimized parameters (memory mapping enabled)");
+            info!("📁 Model file: {}", model_path.display());
+        }
 
-        let model =
-            LlamaModel::load_from_file(&self.backend, model_path, &model_params).map_err(|e| {
-                ModelError::LoadingFailed(format!(
-                    "Failed to load model from {}: {}",
-                    model_path.display(),
-                    e
-                ))
-            })?;
+        // Set logging suppression based on verbose_logging flag
+        set_logging_suppression(!self.config.verbose_logging);
+
+        let model = LlamaModel::load_from_file(&self.backend, model_path, &model_params).map_err(|e| {
+            ModelError::LoadingFailed(format!(
+                "Failed to load model from {}: {}",
+                model_path.display(),
+                e
+            ))
+        })?;
+
+        // Restore default logging after model loading
+        if !self.config.verbose_logging {
+            set_logging_suppression(false);
+        }
 
         info!(
             "✅ Model successfully loaded from: {}",

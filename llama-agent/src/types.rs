@@ -279,6 +279,7 @@ pub struct ModelConfig {
     pub source: ModelSource,
     pub batch_size: u32,
     pub use_hf_params: bool,
+    pub verbose_logging: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -324,6 +325,7 @@ impl Default for ModelConfig {
             },
             batch_size: 512,
             use_hf_params: true,
+            verbose_logging: false,
         }
     }
 }

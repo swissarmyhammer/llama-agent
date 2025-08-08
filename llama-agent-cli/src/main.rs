@@ -271,6 +271,7 @@ async fn run_agent(args: Args) -> Result<String> {
             },
             batch_size: args.batch_size,
             use_hf_params: false,
+            verbose_logging: args.debug,
         }
     } else {
         // Assume HuggingFace repo
@@ -281,6 +282,7 @@ async fn run_agent(args: Args) -> Result<String> {
             },
             batch_size: args.batch_size,
             use_hf_params: true,
+            verbose_logging: args.debug,
         }
     };
 

@@ -4,7 +4,7 @@ resolver = "2"
 
 [workspace.dependencies]
 # Core inference
-llama-cpp-2 = "0.1.109"
+llama-cpp-2 = { version = "0.1.116", features = ["metal"] }
 
 # MCP integration  
 rmcp = { version = "0.4.0", features = ["transport-io"] }

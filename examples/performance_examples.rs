@@ -93,6 +93,7 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
             },
             batch_size: LARGE_BATCH_SIZE, // Large batch for throughput
             use_hf_params: true,
+            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: HIGH_THROUGHPUT_QUEUE_SIZE, // Large queue
@@ -119,6 +120,7 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
             },
             batch_size: MEDIUM_BATCH_SIZE, // Smaller batch for faster response
             use_hf_params: false,          // Skip network calls
+            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: DEFAULT_QUEUE_SIZE, // Smaller queue
@@ -145,6 +147,7 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
             },
             batch_size: SMALL_BATCH_SIZE, // Small batch size
             use_hf_params: true,
+            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: SMALL_QUEUE_SIZE, // Small queue

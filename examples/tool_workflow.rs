@@ -32,6 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             batch_size: 512,
             use_hf_params: true,
+            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: 100,

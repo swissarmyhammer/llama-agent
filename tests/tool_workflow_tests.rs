@@ -31,6 +31,7 @@ async fn test_tool_call_detection() {
             },
             batch_size: 512,
             use_hf_params: false,
+            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: Vec::new(),

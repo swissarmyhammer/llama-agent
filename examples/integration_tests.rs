@@ -183,6 +183,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
             },
             batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: true,
+            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -205,6 +206,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
             },
             batch_size: 0, // Invalid
             use_hf_params: true,
+            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -226,6 +228,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
             },
             batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: true,
+            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -248,6 +251,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
             },
             batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: false,
+            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -275,6 +279,7 @@ async fn test_agent_initialization() -> Result<(), Box<dyn std::error::Error>> {
             },
             batch_size: DEFAULT_BATCH_SIZE,
             use_hf_params: false,
+            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -561,6 +566,7 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
             },
             batch_size: LARGE_BATCH_SIZE, // Large batch
             use_hf_params: true,
+            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: LARGE_QUEUE_SIZE, // Large queue
@@ -589,6 +595,7 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
             },
             batch_size: MEDIUM_BATCH_SIZE, // Smaller batch
             use_hf_params: true,
+            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: DEFAULT_QUEUE_SIZE,
@@ -617,6 +624,7 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
             },
             batch_size: SMALL_BATCH_SIZE, // Small batch
             use_hf_params: true,
+            verbose_logging: false,
         },
         queue_config: QueueConfig {
             max_queue_size: SMALL_QUEUE_SIZE, // Small queue

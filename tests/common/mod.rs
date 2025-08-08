@@ -23,6 +23,7 @@ impl TestHelper {
                 },
                 batch_size: 128,
                 use_hf_params: false,
+                verbose_logging: false,
             },
             queue_config: QueueConfig {
                 max_queue_size: 10,
@@ -141,6 +142,7 @@ impl TestHelper {
                 },
                 batch_size: 128,
                 use_hf_params: false,
+                verbose_logging: false,
             },
             queue_config: QueueConfig {
                 max_queue_size: 5,
