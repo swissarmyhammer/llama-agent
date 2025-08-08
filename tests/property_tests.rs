@@ -97,6 +97,7 @@ prop_compose! {
             batch_size,
             use_hf_params,
             retry_config: RetryConfig::default(),
+            debug: false,
         }
     }
 }

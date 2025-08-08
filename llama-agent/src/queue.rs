@@ -1065,6 +1065,7 @@ mod tests {
             batch_size: 512,
             use_hf_params: false,
             retry_config: RetryConfig::default(),
+            debug: false,
         }
     }
 
@@ -1109,6 +1110,7 @@ mod tests {
             batch_size: 512,
             use_hf_params: false,
             retry_config: RetryConfig::default(),
+            debug: false,
         };
 
         let manager = Arc::new(ModelManager::new(config).expect("Failed to create ModelManager"));

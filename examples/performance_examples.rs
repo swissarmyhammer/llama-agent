@@ -72,6 +72,7 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
             batch_size: 1024, // Large batch for throughput
             use_hf_params: true,
             retry_config: RetryConfig::default(),
+            debug: false,
         },
         queue_config: QueueConfig {
             max_queue_size: 1000,                      // Large queue
@@ -98,6 +99,7 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
             batch_size: 256,      // Smaller batch for faster response
             use_hf_params: false, // Skip network calls
             retry_config: RetryConfig::default(),
+            debug: false,
         },
         queue_config: QueueConfig {
             max_queue_size: 100,                      // Smaller queue
@@ -124,6 +126,7 @@ async fn demonstrate_configuration_optimization() -> Result<(), Box<dyn std::err
             batch_size: 128, // Small batch size
             use_hf_params: true,
             retry_config: RetryConfig::default(),
+            debug: false,
         },
         queue_config: QueueConfig {
             max_queue_size: 50, // Small queue

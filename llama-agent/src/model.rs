@@ -4,6 +4,7 @@ use llama_cpp_2::{
     context::{params::LlamaContextParams, LlamaContext},
     llama_backend::LlamaBackend,
     model::{params::LlamaModelParams, LlamaModel},
+    send_logs_to_tracing, LogOptions,
 };
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -23,6 +24,17 @@ pub struct ModelManager {
 
 impl ModelManager {
     pub fn new(config: ModelConfig) -> Result<Self, ModelError> {
+        // Configure llama.cpp logging based on debug setting
+        if config.debug {
+            // Enable debug logging - send llama.cpp logs to tracing
+            send_logs_to_tracing(LogOptions::default());
+            debug!("Enabled verbose llama.cpp logging via tracing");
+        } else {
+            // When debug is false, we rely on the tracing level configuration
+            // from main.rs (WARN level) to filter out verbose logs
+            debug!("llama.cpp logs will be filtered by tracing WARN level");
+        }
+        
         // Get existing backend or try to initialize new one
         let backend = if let Some(backend) = GLOBAL_BACKEND.get() {
             backend.clone()
@@ -560,6 +572,7 @@ mod tests {
             batch_size: 512,
             use_hf_params: false,
             retry_config: crate::types::RetryConfig::default(),
+            debug: false,
         }
     }
 
@@ -569,6 +582,7 @@ mod tests {
             batch_size: 512,
             use_hf_params: true,
             retry_config: crate::types::RetryConfig::default(),
+            debug: false,
         }
     }
 
