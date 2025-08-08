@@ -43,8 +43,9 @@ async fn test_cli_integration_with_qwen_model() -> Result<()> {
             // We'll do a basic check that it's at least a few characters long
             assert!(response.len() > 10, "Response should be substantial");
 
-            // Log the response for manual inspection during test runs
-            println!("Generated response: {}", response);
+            // Log the response for manual inspection during test runs if needed
+            #[cfg(feature = "test-logging")]
+            eprintln!("Generated response: {}", response);
 
             Ok(())
         }

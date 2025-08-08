@@ -246,13 +246,15 @@ pub async fn run_agent(args: Args) -> Result<String> {
 
     if debug_mode {
         info!("Initializing AgentServer (this may take a while for model loading)...");
+        info!("Loading model from {}...", args.model);
     }
-    println!("Loading model from {}...", args.model);
 
     // Initialize agent server with progress indication
     let agent = match AgentServer::initialize(agent_config).await {
         Ok(agent) => {
-            println!("✓ Model loaded successfully!");
+            if debug_mode {
+                info!("✓ Model loaded successfully!");
+            }
             agent
         }
         Err(e) => {
@@ -268,7 +270,6 @@ pub async fn run_agent(args: Args) -> Result<String> {
         match signal::ctrl_c().await {
             Ok(()) => {
                 warn!("Interrupt signal received, shutting down gracefully...");
-                println!("\n\nShutting down gracefully...");
                 let _ = shutdown_tx.send(()).await;
             }
             Err(err) => {
@@ -307,7 +308,7 @@ pub async fn run_agent(args: Args) -> Result<String> {
     if !session.available_tools.is_empty() && debug_mode {
         info!("Discovered {} tools", session.available_tools.len());
         for tool in &session.available_tools {
-            println!("  - {}: {}", tool.name, tool.description);
+            info!("  - {}: {}", tool.name, tool.description);
         }
     }
 
@@ -332,8 +333,10 @@ pub async fn run_agent(args: Args) -> Result<String> {
         stop_tokens: vec![],
     };
 
-    println!("\nGenerating response (streaming)...");
-    println!("{}", "=".repeat(SEPARATOR_WIDTH));
+    if debug_mode {
+        info!("Generating response (streaming)...");
+        info!("{}", "=".repeat(SEPARATOR_WIDTH));
+    }
     let start_time = std::time::Instant::now();
 
     // Use streaming generation for real-time token output
@@ -372,24 +375,24 @@ pub async fn run_agent(args: Args) -> Result<String> {
 
             let generation_time = start_time.elapsed();
 
-            // Display generation statistics
-            println!("\n{}", "=".repeat(SEPARATOR_WIDTH));
-            println!("Generation Statistics:");
-            println!("  Tokens generated: {}", token_count);
-            println!("  Time taken: {:.2}s", generation_time.as_secs_f32());
-            if token_count > 0 {
-                println!(
-                    "  Tokens per second: {:.1}",
-                    token_count as f32 / generation_time.as_secs_f32()
-                );
+            // Display generation statistics only in debug mode
+            if debug_mode {
+                info!("Generation Statistics:");
+                info!("  Tokens generated: {}", token_count);
+                info!("  Time taken: {:.2}s", generation_time.as_secs_f32());
+                if token_count > 0 {
+                    info!(
+                        "  Tokens per second: {:.1}",
+                        token_count as f32 / generation_time.as_secs_f32()
+                    );
+                }
+                info!("  Finish reason: {:?}", finish_reason);
             }
-            println!("  Finish reason: {:?}", finish_reason);
-            println!("{}", "=".repeat(SEPARATOR_WIDTH));
 
             // Handle warnings based on finish reason or token count
-            if token_count >= args.limit {
-                println!(
-                    "\n⚠️  Response may have been truncated due to token limit ({})",
+            if token_count >= args.limit && debug_mode {
+                warn!(
+                    "Response may have been truncated due to token limit ({})",
                     args.limit
                 );
             }
@@ -397,8 +400,11 @@ pub async fn run_agent(args: Args) -> Result<String> {
             // Check if the response looks like it contains tool calls
             if full_response.contains("```")
                 && (full_response.contains("function_call") || full_response.contains("tool_call"))
+                && debug_mode
             {
-                println!("\n⚠️  Model wants to call tools, but basic CLI doesn't support tool execution yet.");
+                warn!(
+                    "Model wants to call tools, but basic CLI doesn't support tool execution yet."
+                );
             }
 
             Ok(full_response)
