@@ -1,6 +1,6 @@
 use crate::types::{
-    GetPromptResult, MCPError, MCPServerConfig, PromptDefinition, ToolCall, ToolDefinition,
-    ToolResult,
+    GetPromptResult, MCPError, MCPServerConfig, MessageRole, PromptArgument, PromptContent,
+    PromptDefinition, PromptMessage, PromptResource, ToolCall, ToolDefinition, ToolResult,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -27,11 +27,11 @@ pub enum HealthStatus {
 #[async_trait]
 pub trait MCPServer: Send + Sync {
     async fn initialize(&mut self) -> Result<(), MCPError>;
-    async fn list_tools(&self) -> Result<Vec<ToolDefinition>, MCPError>;
-    async fn call_tool(&self, tool_name: &str, args: Value) -> Result<Value, MCPError>;
-    async fn list_prompts(&self) -> Result<Vec<PromptDefinition>, MCPError>;
+    async fn list_tools(&mut self) -> Result<Vec<ToolDefinition>, MCPError>;
+    async fn call_tool(&mut self, tool_name: &str, args: Value) -> Result<Value, MCPError>;
+    async fn list_prompts(&mut self) -> Result<Vec<PromptDefinition>, MCPError>;
     async fn get_prompt(
-        &self,
+        &mut self,
         prompt_name: &str,
         arguments: Option<Value>,
     ) -> Result<GetPromptResult, MCPError>;
@@ -288,7 +288,7 @@ impl MCPServer for MCPServerImpl {
         Ok(())
     }
 
-    async fn list_tools(&self) -> Result<Vec<ToolDefinition>, MCPError> {
+    async fn list_tools(&mut self) -> Result<Vec<ToolDefinition>, MCPError> {
         if !self.initialized {
             return Err(MCPError::Connection(format!(
                 "Server '{}' not initialized",
@@ -313,7 +313,7 @@ impl MCPServer for MCPServerImpl {
         Ok(tool_definitions)
     }
 
-    async fn list_prompts(&self) -> Result<Vec<PromptDefinition>, MCPError> {
+    async fn list_prompts(&mut self) -> Result<Vec<PromptDefinition>, MCPError> {
         if !self.initialized {
             return Err(MCPError::Connection(format!(
                 "Server '{}' not initialized",
@@ -323,9 +323,66 @@ impl MCPServer for MCPServerImpl {
 
         debug!("Listing prompts for MCP server: {}", self.config.name);
 
-        // This is a simplified implementation similar to list_tools
-        // In practice, this would send a "prompts/list" request to the server
-        let prompt_definitions = Vec::new();
+        // Send prompts/list request to the server
+        let response = self.send_request("prompts/list", json!({})).await?;
+
+        // Parse the response to extract prompt definitions
+        let prompts_array = response
+            .get("prompts")
+            .and_then(|p| p.as_array())
+            .ok_or_else(|| {
+                MCPError::Protocol("Invalid prompts/list response format".to_string())
+            })?;
+
+        let mut prompt_definitions = Vec::new();
+        for prompt_data in prompts_array {
+            let name = prompt_data
+                .get("name")
+                .and_then(|n| n.as_str())
+                .ok_or_else(|| MCPError::Protocol("Prompt missing name field".to_string()))?
+                .to_string();
+
+            let description = prompt_data
+                .get("description")
+                .and_then(|d| d.as_str())
+                .map(|s| s.to_string());
+
+            let mut arguments = Vec::new();
+            if let Some(args_array) = prompt_data.get("arguments").and_then(|a| a.as_array()) {
+                for arg_data in args_array {
+                    let arg_name = arg_data
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .ok_or_else(|| {
+                            MCPError::Protocol("Prompt argument missing name".to_string())
+                        })?
+                        .to_string();
+
+                    let arg_description = arg_data
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .map(|s| s.to_string());
+
+                    let required = arg_data
+                        .get("required")
+                        .and_then(|r| r.as_bool())
+                        .unwrap_or(false);
+
+                    arguments.push(PromptArgument {
+                        name: arg_name,
+                        description: arg_description,
+                        required,
+                    });
+                }
+            }
+
+            prompt_definitions.push(PromptDefinition {
+                name,
+                description,
+                arguments,
+                server_name: self.config.name.clone(),
+            });
+        }
 
         debug!(
             "Found {} prompts for server '{}'",
@@ -336,7 +393,7 @@ impl MCPServer for MCPServerImpl {
     }
 
     async fn get_prompt(
-        &self,
+        &mut self,
         prompt_name: &str,
         arguments: Option<Value>,
     ) -> Result<GetPromptResult, MCPError> {
@@ -352,25 +409,165 @@ impl MCPServer for MCPServerImpl {
             prompt_name, self.config.name, arguments
         );
 
-        // This is a simplified implementation - in practice, this would send a "prompts/get" request
-        // For now, return a basic prompt result to maintain compatibility
+        // Build the prompts/get request parameters
+        let mut params = json!({
+            "name": prompt_name
+        });
+
+        if let Some(args) = arguments {
+            params["arguments"] = args;
+        }
+
+        // Send prompts/get request to the server
+        let response = self.send_request("prompts/get", params).await?;
+
+        // Parse the description from the response
+        let description = response
+            .get("description")
+            .and_then(|d| d.as_str())
+            .map(|s| s.to_string());
+
+        // Parse the messages array from the response
+        let messages_array = response
+            .get("messages")
+            .and_then(|m| m.as_array())
+            .ok_or_else(|| {
+                MCPError::Protocol(
+                    "Invalid prompts/get response format: missing messages".to_string(),
+                )
+            })?;
+
+        let mut messages = Vec::new();
+        for message_data in messages_array {
+            // Parse the role
+            let role_str = message_data
+                .get("role")
+                .and_then(|r| r.as_str())
+                .ok_or_else(|| MCPError::Protocol("Message missing role field".to_string()))?;
+
+            let role = match role_str {
+                "system" => MessageRole::System,
+                "user" => MessageRole::User,
+                "assistant" => MessageRole::Assistant,
+                "tool" => MessageRole::Tool,
+                _ => {
+                    return Err(MCPError::Protocol(format!(
+                        "Unknown message role: {}",
+                        role_str
+                    )))
+                }
+            };
+
+            // Parse the content
+            let content_data = message_data
+                .get("content")
+                .ok_or_else(|| MCPError::Protocol("Message missing content field".to_string()))?;
+
+            let content = if let Some(content_type) =
+                content_data.get("type").and_then(|t| t.as_str())
+            {
+                match content_type {
+                    "text" => {
+                        let text = content_data
+                            .get("text")
+                            .and_then(|t| t.as_str())
+                            .ok_or_else(|| {
+                                MCPError::Protocol("Text content missing text field".to_string())
+                            })?
+                            .to_string();
+                        PromptContent::Text { text }
+                    }
+                    "image" => {
+                        let data = content_data
+                            .get("data")
+                            .and_then(|d| d.as_str())
+                            .ok_or_else(|| {
+                                MCPError::Protocol("Image content missing data field".to_string())
+                            })?
+                            .to_string();
+                        let mime_type = content_data
+                            .get("mimeType")
+                            .and_then(|m| m.as_str())
+                            .ok_or_else(|| {
+                                MCPError::Protocol(
+                                    "Image content missing mimeType field".to_string(),
+                                )
+                            })?
+                            .to_string();
+                        PromptContent::Image { data, mime_type }
+                    }
+                    "resource" => {
+                        let resource_data = content_data.get("resource").ok_or_else(|| {
+                            MCPError::Protocol(
+                                "Resource content missing resource field".to_string(),
+                            )
+                        })?;
+
+                        let uri = resource_data
+                            .get("uri")
+                            .and_then(|u| u.as_str())
+                            .ok_or_else(|| {
+                                MCPError::Protocol("Resource missing uri field".to_string())
+                            })?
+                            .to_string();
+
+                        let text = resource_data
+                            .get("text")
+                            .and_then(|t| t.as_str())
+                            .map(|s| s.to_string());
+
+                        let mime_type = resource_data
+                            .get("mimeType")
+                            .and_then(|m| m.as_str())
+                            .map(|s| s.to_string());
+
+                        PromptContent::Resource {
+                            resource: PromptResource {
+                                uri,
+                                text,
+                                mime_type,
+                            },
+                        }
+                    }
+                    _ => {
+                        return Err(MCPError::Protocol(format!(
+                            "Unknown content type: {}",
+                            content_type
+                        )))
+                    }
+                }
+            } else {
+                // Handle legacy format where content might be just a string
+                let text = content_data
+                    .as_str()
+                    .ok_or_else(|| {
+                        MCPError::Protocol(
+                            "Content must be either object with type or string".to_string(),
+                        )
+                    })?
+                    .to_string();
+                PromptContent::Text { text }
+            };
+
+            messages.push(PromptMessage { role, content });
+        }
+
         let result = GetPromptResult {
-            description: Some(format!(
-                "Prompt '{}' from server '{}'",
-                prompt_name, self.config.name
-            )),
-            messages: Vec::new(),
+            description,
+            messages,
         };
 
         debug!(
-            "Retrieved prompt '{}' from server '{}' successfully",
-            prompt_name, self.config.name
+            "Retrieved prompt '{}' from server '{}' successfully with {} messages",
+            prompt_name,
+            self.config.name,
+            result.messages.len()
         );
 
         Ok(result)
     }
 
-    async fn call_tool(&self, tool_name: &str, args: Value) -> Result<Value, MCPError> {
+    async fn call_tool(&mut self, tool_name: &str, args: Value) -> Result<Value, MCPError> {
         if !self.initialized {
             return Err(MCPError::Connection(format!(
                 "Server '{}' not initialized",
@@ -667,7 +864,7 @@ impl MCPClient {
         let mut current_tools_by_server = HashMap::new();
 
         for (server_name, server_arc) in servers.iter() {
-            let server = server_arc.lock().await;
+            let mut server = server_arc.lock().await;
 
             match server.list_tools().await {
                 Ok(mut tools) => {
@@ -781,7 +978,7 @@ impl MCPClient {
         let mut current_prompts_by_server = HashMap::new();
 
         for (server_name, server_arc) in servers.iter() {
-            let server = server_arc.lock().await;
+            let mut server = server_arc.lock().await;
 
             match server.list_prompts().await {
                 Ok(mut prompts) => {
@@ -906,7 +1103,7 @@ impl MCPClient {
             .get(server_name)
             .ok_or_else(|| MCPError::ServerNotFound(server_name.to_string()))?;
 
-        let server = server_arc.lock().await;
+        let mut server = server_arc.lock().await;
 
         // Execute the prompt get
         let result = server.get_prompt(prompt_name, arguments).await?;
@@ -990,7 +1187,7 @@ impl MCPClient {
             .get(server_name)
             .ok_or_else(|| MCPError::ServerNotFound(server_name.to_string()))?;
 
-        let server = server_arc.lock().await;
+        let mut server = server_arc.lock().await;
 
         // Execute the tool call
         let result = server.call_tool(tool_name, args).await?;
@@ -1253,14 +1450,14 @@ mod tests {
             Ok(())
         }
 
-        async fn list_tools(&self) -> Result<Vec<ToolDefinition>, MCPError> {
+        async fn list_tools(&mut self) -> Result<Vec<ToolDefinition>, MCPError> {
             if self.should_fail {
                 return Err(MCPError::Protocol("Mock tool listing failure".to_string()));
             }
             Ok(self.tools.clone())
         }
 
-        async fn call_tool(&self, tool_name: &str, args: Value) -> Result<Value, MCPError> {
+        async fn call_tool(&mut self, tool_name: &str, args: Value) -> Result<Value, MCPError> {
             if self.should_fail {
                 return Err(MCPError::ToolCallFailed(format!(
                     "Mock tool call failure for {}",
@@ -1303,7 +1500,7 @@ mod tests {
             Ok(())
         }
 
-        async fn list_prompts(&self) -> Result<Vec<PromptDefinition>, MCPError> {
+        async fn list_prompts(&mut self) -> Result<Vec<PromptDefinition>, MCPError> {
             if self.should_fail {
                 return Err(MCPError::Protocol(
                     "Mock prompt listing failure".to_string(),
@@ -1313,7 +1510,7 @@ mod tests {
         }
 
         async fn get_prompt(
-            &self,
+            &mut self,
             prompt_name: &str,
             arguments: Option<Value>,
         ) -> Result<GetPromptResult, MCPError> {

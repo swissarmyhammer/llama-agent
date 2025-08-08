@@ -224,7 +224,7 @@ fn test_session_state_management() {
 
     // Small delay to ensure timestamp difference
     std::thread::sleep(std::time::Duration::from_millis(1));
-    
+
     // Update session timestamp
     session.updated_at = SystemTime::now();
 
