@@ -65,24 +65,6 @@ impl SessionManager {
         }
     }
 
-    pub async fn update_session(&self, session: Session) -> Result<(), SessionError> {
-        let mut sessions = self.sessions.write().await;
-
-        // Check if session exists
-        if !sessions.contains_key(&session.id) {
-            return Err(SessionError::NotFound(session.id.to_string()));
-        }
-
-        // Update the timestamp
-        let mut updated_session = session;
-        updated_session.updated_at = SystemTime::now();
-
-        debug!("Updating session: {}", updated_session.id);
-        sessions.insert(updated_session.id, updated_session);
-
-        Ok(())
-    }
-
     pub async fn add_message(
         &self,
         session_id: &SessionId,
@@ -261,48 +243,6 @@ mod tests {
         let non_existent_id = SessionId::new(); // Different ID
         let non_existent = manager.get_session(&non_existent_id).await.unwrap();
         assert!(non_existent.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_update_session() {
-        let config = create_test_config();
-        let manager = SessionManager::new(config);
-
-        let mut session = manager.create_session().await.unwrap();
-        let session_id = session.id;
-        let original_updated_at = session.updated_at;
-
-        // Wait a bit to ensure timestamp difference
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        session.messages.push(create_test_message());
-
-        let result = manager.update_session(session).await;
-        assert!(result.is_ok());
-
-        // Verify the session was updated
-        let updated_session = manager.get_session(&session_id).await.unwrap().unwrap();
-        assert_eq!(updated_session.messages.len(), 1);
-        assert!(updated_session.updated_at > original_updated_at);
-    }
-
-    #[tokio::test]
-    async fn test_update_non_existent_session() {
-        let config = create_test_config();
-        let manager = SessionManager::new(config);
-
-        let session = Session {
-            id: SessionId::new(),
-            messages: Vec::new(),
-            mcp_servers: Vec::new(),
-            available_tools: Vec::new(),
-            available_prompts: Vec::new(),
-            created_at: SystemTime::now(),
-            updated_at: SystemTime::now(),
-        };
-
-        let result = manager.update_session(session).await;
-        assert!(matches!(result, Err(SessionError::NotFound(_))));
     }
 
     #[tokio::test]

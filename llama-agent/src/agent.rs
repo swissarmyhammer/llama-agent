@@ -5,7 +5,7 @@ use crate::queue::RequestQueue;
 use crate::session::SessionManager;
 use crate::types::{
     AgentAPI, AgentConfig, AgentError, GenerationRequest, GenerationResponse, HealthStatus,
-    Session, SessionId, StreamChunk, ToolCall, ToolResult,
+    Message, Session, SessionId, StreamChunk, ToolCall, ToolResult,
 };
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
@@ -733,10 +733,11 @@ impl AgentAPI for AgentServer {
         Ok(session)
     }
 
-    async fn update_session(&self, session: Session) -> Result<(), AgentError> {
-        debug!("Updating session: {}", session.id);
-        self.session_manager.update_session(session).await?;
-        Ok(())
+    async fn add_message(&self, session_id: &SessionId, message: Message) -> Result<(), AgentError> {
+        self.session_manager
+            .add_message(session_id, message)
+            .await
+            .map_err(AgentError::Session)
     }
 
     async fn discover_tools(&self, session: &mut Session) -> Result<(), AgentError> {
