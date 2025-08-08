@@ -23,7 +23,7 @@ impl TestHelper {
                 batch_size: 128,
                 use_hf_params: false,
                 retry_config: RetryConfig::default(),
-            debug: false,
+                debug: false,
             },
             queue_config: QueueConfig {
                 max_queue_size: 10,
@@ -143,7 +143,7 @@ impl TestHelper {
                 batch_size: 128,
                 use_hf_params: false,
                 retry_config: RetryConfig::default(),
-            debug: false,
+                debug: false,
             },
             queue_config: QueueConfig {
                 max_queue_size: 5,

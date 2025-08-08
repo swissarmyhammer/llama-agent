@@ -898,7 +898,7 @@ mod tests {
                 batch_size: 512,
                 use_hf_params: false,
                 retry_config: RetryConfig::default(),
-            debug: false,
+                debug: false,
             },
             queue_config: QueueConfig::default(),
             mcp_servers: Vec::new(),
