@@ -47,4 +47,5 @@ tmp
 
 # Temporary documentation files
 REVIEW_*.md
+CODE_REVIEW.md
 TEST_FAILURES.md
