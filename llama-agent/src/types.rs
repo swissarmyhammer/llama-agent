@@ -399,6 +399,7 @@ pub struct ModelConfig {
     pub batch_size: u32,
     pub use_hf_params: bool,
     pub retry_config: RetryConfig,
+    pub debug: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -445,6 +446,7 @@ impl Default for ModelConfig {
             batch_size: 512,
             use_hf_params: true,
             retry_config: RetryConfig::default(),
+            debug: false,
         }
     }
 }
@@ -1114,6 +1116,7 @@ mod tests {
             batch_size: 512,
             use_hf_params: true,
             retry_config: RetryConfig::default(),
+            debug: false,
         };
 
         assert!(config.validate().is_ok());
@@ -1129,6 +1132,7 @@ mod tests {
             batch_size: 0,
             use_hf_params: true,
             retry_config: RetryConfig::default(),
+            debug: false,
         };
 
         assert!(config.validate().is_err());
@@ -1141,6 +1145,7 @@ mod tests {
             batch_size: 10000,
             use_hf_params: true,
             retry_config: RetryConfig::default(),
+            debug: false,
         };
 
         assert!(config.validate().is_err());
