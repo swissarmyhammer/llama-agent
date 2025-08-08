@@ -1283,6 +1283,7 @@ mod tests {
             }],
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
+            available_prompts: Vec::new(),
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         }

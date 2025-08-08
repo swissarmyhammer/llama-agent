@@ -483,6 +483,7 @@ mod tests {
                 parameters: serde_json::json!({"type": "object", "properties": {"path": {"type": "string"}}}),
                 server_name: "filesystem".to_string(),
             }],
+            available_prompts: vec![],
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         }

@@ -222,6 +222,9 @@ fn test_session_state_management() {
         timestamp: SystemTime::now(),
     });
 
+    // Small delay to ensure timestamp difference
+    std::thread::sleep(std::time::Duration::from_millis(1));
+
     // Update session timestamp
     session.updated_at = SystemTime::now();
 
@@ -313,6 +316,7 @@ fn create_test_session_with_tools() -> Session {
             }),
             server_name: "test_server".to_string(),
         }],
+        available_prompts: vec![],
         created_at: SystemTime::now(),
         updated_at: SystemTime::now(),
     }

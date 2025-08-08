@@ -29,20 +29,14 @@ const DEFAULT_BATCH_SIZE: u32 = 512;
 const LARGE_BATCH_SIZE: u32 = 1024;
 const SMALL_QUEUE_SIZE: usize = 50;
 const DEFAULT_QUEUE_SIZE: usize = 100;
-const LARGE_QUEUE_SIZE: usize = 1000;
 const HIGH_THROUGHPUT_QUEUE_SIZE: usize = 1000;
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const EXTENDED_TIMEOUT_SECS: u64 = 45;
 const MODERATE_TIMEOUT_SECS: u64 = 60;
 const LONG_TIMEOUT_SECS: u64 = 120;
 const GENEROUS_TIMEOUT_SECS: u64 = 180;
-const DEFAULT_MAX_TOKENS: u32 = 100;
-const SMALL_SESSION_LIMIT: usize = 100;
-const MODERATE_SESSION_LIMIT: usize = 1000;
-const HIGH_SESSION_LIMIT: usize = 10000;
 const SINGLE_WORKER: usize = 1;
 const DUAL_WORKERS: usize = 2;
-const BENCHMARK_ITERATIONS: usize = 10;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -461,7 +455,7 @@ async fn benchmark_configurations() -> Result<(), Box<dyn std::error::Error>> {
     println!("  • Reliability: error rates, timeout rates");
     println!("  • Scalability: performance vs. load");
 
-    println!("\nFor real performance testing, see the benchmark_real_performance()");
+    println!("\nFor real performance testing, implement actual benchmark functionality as needed.");
     println!("function below, which provides actual benchmarking against a running agent.");
 
     Ok(())
@@ -478,64 +472,4 @@ fn print_config_summary(name: &str, config: &AgentConfig) {
     );
     println!("    Max sessions: {}", config.session_config.max_sessions);
     println!("    MCP servers: {}", config.mcp_servers.len());
-}
-
-/// Real performance benchmarking function for testing against a running agent
-/// Call this function if you want to perform actual performance measurements
-async fn benchmark_real_performance(
-    agent: &AgentServer,
-    test_prompts: Vec<String>,
-    iterations: usize,
-) -> Result<BenchmarkResults, Box<dyn std::error::Error>> {
-    let mut results = BenchmarkResults::default();
-
-    for i in 0..iterations {
-        let start = Instant::now();
-
-        for prompt in &test_prompts {
-            let mut session = agent.create_session().await?;
-            session.messages.push(Message {
-                role: MessageRole::User,
-                content: prompt.clone(),
-                tool_call_id: None,
-                tool_name: None,
-                timestamp: SystemTime::now(),
-            });
-
-            let request = GenerationRequest {
-                session,
-                max_tokens: Some(DEFAULT_MAX_TOKENS),
-                temperature: Some(0.7),
-                top_p: Some(0.9),
-                stop_tokens: vec![],
-            };
-
-            let response = agent.generate(request).await?;
-            results.total_tokens += response.tokens_generated;
-        }
-
-        results.total_time += start.elapsed();
-        results.iterations = i + 1;
-    }
-
-    results.calculate_averages();
-    Ok(results)
-}
-
-#[derive(Default)]
-struct BenchmarkResults {
-    total_tokens: u32,
-    total_time: Duration,
-    iterations: usize,
-    tokens_per_second: f32,
-    average_time_per_request: Duration,
-}
-
-impl BenchmarkResults {
-    fn calculate_averages(&mut self) {
-        if self.iterations > 0 {
-            self.tokens_per_second = self.total_tokens as f32 / self.total_time.as_secs_f32();
-            self.average_time_per_request = self.total_time / self.iterations as u32;
-        }
-    }
 }

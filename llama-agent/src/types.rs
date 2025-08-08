@@ -115,6 +115,7 @@ pub struct Session {
     pub messages: Vec<Message>,
     pub mcp_servers: Vec<MCPServerConfig>,
     pub available_tools: Vec<ToolDefinition>,
+    pub available_prompts: Vec<PromptDefinition>,
     pub created_at: SystemTime,
     pub updated_at: SystemTime,
 }
@@ -133,6 +134,88 @@ pub struct ToolDefinition {
     pub description: String,
     pub parameters: serde_json::Value,
     pub server_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PromptId(Ulid);
+
+impl PromptId {
+    pub fn new() -> Self {
+        Self(Ulid::new())
+    }
+
+    pub fn from_ulid(ulid: Ulid) -> Self {
+        Self(ulid)
+    }
+
+    pub fn as_ulid(&self) -> Ulid {
+        self.0
+    }
+}
+
+impl std::fmt::Display for PromptId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for PromptId {
+    type Err = ulid::DecodeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Ulid::from_string(s)?))
+    }
+}
+
+impl Default for PromptId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptDefinition {
+    pub name: String,
+    pub description: Option<String>,
+    pub arguments: Vec<PromptArgument>,
+    pub server_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptArgument {
+    pub name: String,
+    pub description: Option<String>,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptMessage {
+    pub role: MessageRole,
+    pub content: PromptContent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum PromptContent {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image")]
+    Image { data: String, mime_type: String },
+    #[serde(rename = "resource")]
+    Resource { resource: PromptResource },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptResource {
+    pub uri: String,
+    pub text: Option<String>,
+    pub mime_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetPromptResult {
+    pub description: Option<String>,
+    pub messages: Vec<PromptMessage>,
 }
 
 #[derive(Debug, Serialize)]
@@ -725,6 +808,7 @@ mod tests {
             messages: Vec::new(),
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
+            available_prompts: Vec::new(),
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         };
@@ -733,6 +817,7 @@ mod tests {
         assert!(session.messages.is_empty());
         assert!(session.mcp_servers.is_empty());
         assert!(session.available_tools.is_empty());
+        assert!(session.available_prompts.is_empty());
     }
 
     #[test]
@@ -772,6 +857,7 @@ mod tests {
             messages: Vec::new(),
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
+            available_prompts: Vec::new(),
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         };

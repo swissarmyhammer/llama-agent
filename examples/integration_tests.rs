@@ -533,6 +533,7 @@ async fn test_streaming_patterns() -> Result<(), Box<dyn std::error::Error>> {
         messages: vec![],
         mcp_servers: vec![],
         available_tools: vec![],
+        available_prompts: vec![],
         created_at: SystemTime::now(),
         updated_at: SystemTime::now(),
     };
