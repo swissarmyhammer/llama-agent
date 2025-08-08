@@ -96,7 +96,7 @@ impl ModelManager {
 
         // Store memory usage estimate (atomic operation safe in Arc)
         self.memory_usage_bytes.store(
-            (memory_used * 1024 * 1024) as u64,
+            memory_used * 1024 * 1024,
             std::sync::atomic::Ordering::Relaxed,
         );
 
@@ -296,7 +296,7 @@ impl ModelManager {
             .unwrap_or(4);
 
         // Use 75% of available cores, minimum 1, maximum 16
-        let optimal = ((logical_cores * 3) / 4).max(1).min(16);
+        let optimal = ((logical_cores * 3) / 4).clamp(1, 16);
         debug!(
             "Detected {} logical cores, using {} threads for inference",
             logical_cores, optimal

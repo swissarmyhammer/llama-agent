@@ -698,6 +698,7 @@ impl RequestQueue {
         false
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_streaming_request_sync(
         worker_id: usize,
         request_id: String,
@@ -894,6 +895,7 @@ impl RequestQueue {
     }
 
     /// Handle completion of streaming request with tool call detection
+    #[allow(clippy::too_many_arguments)]
     fn handle_streaming_completion(
         worker_id: usize,
         request_id: String,
@@ -1075,6 +1077,7 @@ mod tests {
             }],
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
+            available_prompts: Vec::new(),
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         }

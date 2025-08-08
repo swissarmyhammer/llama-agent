@@ -47,6 +47,43 @@ impl Default for SessionId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ToolCallId(Ulid);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PromptId(Ulid);
+
+impl PromptId {
+    pub fn new() -> Self {
+        Self(Ulid::new())
+    }
+
+    pub fn from_ulid(ulid: Ulid) -> Self {
+        Self(ulid)
+    }
+
+    pub fn as_ulid(&self) -> Ulid {
+        self.0
+    }
+}
+
+impl std::fmt::Display for PromptId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for PromptId {
+    type Err = ulid::DecodeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Ulid::from_string(s)?))
+    }
+}
+
+impl Default for PromptId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolCallId {
     pub fn new() -> Self {
         Self(Ulid::new())
@@ -115,6 +152,7 @@ pub struct Session {
     pub messages: Vec<Message>,
     pub mcp_servers: Vec<MCPServerConfig>,
     pub available_tools: Vec<ToolDefinition>,
+    pub available_prompts: Vec<PromptDefinition>,
     pub created_at: SystemTime,
     pub updated_at: SystemTime,
 }
@@ -173,6 +211,148 @@ pub struct ToolResult {
     pub call_id: ToolCallId,
     pub result: serde_json::Value,
     pub error: Option<String>,
+}
+
+// MCP Prompt types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptDefinition {
+    pub name: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub arguments: Option<Vec<PromptArgument>>,
+    pub server_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptArgument {
+    pub name: String,
+    pub description: Option<String>,
+    pub required: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptMessage {
+    pub role: PromptRole,
+    pub content: PromptContent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PromptRole {
+    #[serde(rename = "user")]
+    User,
+    #[serde(rename = "assistant")]
+    Assistant,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum PromptContent {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image")]
+    Image { data: String, mime_type: String },
+    #[serde(rename = "resource")]
+    Resource { resource: PromptResource },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptResource {
+    pub uri: String,
+    pub name: String,
+    pub title: Option<String>,
+    pub mime_type: String,
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetPromptResult {
+    pub description: Option<String>,
+    pub messages: Vec<PromptMessage>,
+}
+
+// Dependency Analysis types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParallelExecutionConfig {
+    pub max_parallel_tools: usize,
+    pub conflict_detection: bool,
+    pub resource_analysis: bool,
+    pub timeout_ms: u64,
+    pub never_parallel: Vec<(String, String)>,
+    pub tool_conflicts: Vec<ToolConflict>,
+    pub resource_access_patterns: std::collections::HashMap<String, Vec<ResourceAccess>>,
+}
+
+impl Default for ParallelExecutionConfig {
+    fn default() -> Self {
+        Self {
+            max_parallel_tools: 4,
+            conflict_detection: true,
+            resource_analysis: true,
+            timeout_ms: 30000,
+            never_parallel: Vec::new(),
+            tool_conflicts: Vec::new(),
+            resource_access_patterns: std::collections::HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum AccessType {
+    Read,
+    Write,
+    ReadWrite,
+    Delete,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceAccess {
+    pub resource: ResourceType,
+    pub access_type: AccessType,
+    pub exclusive: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ResourceType {
+    File(String),
+    FileSystem(String),
+    Network(String),
+    Database(String),
+    Memory,
+    System,
+    Other(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ConflictType {
+    ResourceConflict,
+    DependencyConflict,
+    OrderDependency,
+    MutualExclusion,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConflict {
+    pub tool1: String,
+    pub tool2: String,
+    pub conflict_type: ConflictType,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ReferenceType {
+    Input,
+    Output,
+    Context,
+    DirectOutput,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParameterReference {
+    pub parameter_name: String,
+    pub parameter_path: String,
+    pub reference_type: ReferenceType,
+    pub target_tool: Option<String>,
+    pub referenced_tool: String,
 }
 
 #[derive(Debug)]
@@ -639,6 +819,7 @@ mod tests {
             messages: Vec::new(),
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
+            available_prompts: Vec::new(),
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         };
@@ -647,6 +828,7 @@ mod tests {
         assert!(session.messages.is_empty());
         assert!(session.mcp_servers.is_empty());
         assert!(session.available_tools.is_empty());
+        assert!(session.available_prompts.is_empty());
     }
 
     #[test]
@@ -686,6 +868,7 @@ mod tests {
             messages: Vec::new(),
             mcp_servers: Vec::new(),
             available_tools: Vec::new(),
+            available_prompts: Vec::new(),
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         };

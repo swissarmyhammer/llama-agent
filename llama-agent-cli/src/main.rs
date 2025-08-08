@@ -4,7 +4,7 @@ use futures::StreamExt;
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, Message, MessageRole, ModelConfig,
-        ModelSource, ParallelExecutionConfig, QueueConfig, SessionConfig,
+        ModelSource, QueueConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -271,7 +271,6 @@ async fn run_agent(args: Args) -> Result<String> {
             },
             batch_size: args.batch_size,
             use_hf_params: false,
-            verbose_logging: args.debug,
         }
     } else {
         // Assume HuggingFace repo
@@ -282,7 +281,6 @@ async fn run_agent(args: Args) -> Result<String> {
             },
             batch_size: args.batch_size,
             use_hf_params: true,
-            verbose_logging: args.debug,
         }
     };
 
@@ -299,7 +297,6 @@ async fn run_agent(args: Args) -> Result<String> {
             session_timeout: Duration::from_secs(args.session_timeout),
         },
         mcp_servers: vec![], // No MCP servers for basic CLI
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     if debug_mode {

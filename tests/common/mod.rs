@@ -1,5 +1,5 @@
 use llama_agent::{
-    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, ParallelExecutionConfig,
+    AgentConfig, Message, MessageRole, ModelConfig, ModelSource,
     QueueConfig, Session, SessionConfig, SessionId, ToolCall, ToolCallId, ToolDefinition,
     ToolResult,
 };
@@ -23,7 +23,6 @@ impl TestHelper {
                 },
                 batch_size: 128,
                 use_hf_params: false,
-                verbose_logging: false,
             },
             queue_config: QueueConfig {
                 max_queue_size: 10,
@@ -35,7 +34,6 @@ impl TestHelper {
                 max_sessions: 10,
                 session_timeout: Duration::from_secs(300), // 5 minutes for tests
             },
-            parallel_execution_config: ParallelExecutionConfig::default(),
         }
     }
 
@@ -143,7 +141,6 @@ impl TestHelper {
                 },
                 batch_size: 128,
                 use_hf_params: false,
-                verbose_logging: false,
             },
             queue_config: QueueConfig {
                 max_queue_size: 5,
@@ -155,7 +152,6 @@ impl TestHelper {
                 max_sessions: 5,
                 session_timeout: Duration::from_secs(60),
             },
-            parallel_execution_config: ParallelExecutionConfig::default(),
         }
     }
 }

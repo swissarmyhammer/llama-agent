@@ -303,12 +303,10 @@ async fn test_error_handling_paths() {
             },
             batch_size: 512,
             use_hf_params: false,
-            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     assert!(invalid_config.validate().is_err());
@@ -322,12 +320,10 @@ async fn test_error_handling_paths() {
             },
             batch_size: 512,
             use_hf_params: false,
-            verbose_logging: false,
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     assert!(invalid_hf_config.validate().is_err());
@@ -351,7 +347,6 @@ async fn test_error_handling_paths() {
             },
         ],
         session_config: SessionConfig::default(),
-        parallel_execution_config: ParallelExecutionConfig::default(),
     };
 
     assert!(duplicate_mcp_config.validate().is_err());
@@ -385,7 +380,7 @@ async fn test_timeout_scenarios() {
             assert!(result.is_ok()); // Timeout should complete, but request should fail
 
             match result.unwrap() {
-                Err(QueueError::Timeout { duration: _ }) => {
+                Err(QueueError::Timeout) => {
                     // Expected timeout
                 }
                 Err(QueueError::WorkerError(_)) => {

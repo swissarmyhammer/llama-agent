@@ -1,6 +1,6 @@
 use crate::types::{
-    GetPromptResult, MCPError, MCPServerConfig, MessageRole, PromptArgument, PromptContent,
-    PromptDefinition, PromptMessage, PromptResource, ToolCall, ToolDefinition, ToolResult,
+    GetPromptResult, MCPError, MCPServerConfig, PromptArgument, PromptContent, PromptDefinition,
+    PromptMessage, PromptResource, PromptRole, ToolCall, ToolDefinition, ToolResult,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -371,15 +371,16 @@ impl MCPServer for MCPServerImpl {
                     arguments.push(PromptArgument {
                         name: arg_name,
                         description: arg_description,
-                        required,
+                        required: Some(required),
                     });
                 }
             }
 
             prompt_definitions.push(PromptDefinition {
                 name,
+                title: None,
                 description,
-                arguments,
+                arguments: Some(arguments),
                 server_name: self.config.name.clone(),
             });
         }
@@ -446,13 +447,11 @@ impl MCPServer for MCPServerImpl {
                 .ok_or_else(|| MCPError::Protocol("Message missing role field".to_string()))?;
 
             let role = match role_str {
-                "system" => MessageRole::System,
-                "user" => MessageRole::User,
-                "assistant" => MessageRole::Assistant,
-                "tool" => MessageRole::Tool,
+                "user" => PromptRole::User,
+                "assistant" => PromptRole::Assistant,
                 _ => {
                     return Err(MCPError::Protocol(format!(
-                        "Unknown message role: {}",
+                        "Unknown prompt role: {} (only 'user' and 'assistant' are supported)",
                         role_str
                     )))
                 }
@@ -523,9 +522,11 @@ impl MCPServer for MCPServerImpl {
 
                         PromptContent::Resource {
                             resource: PromptResource {
-                                uri,
+                                uri: uri.clone(),
+                                name: uri.split('/').next_back().unwrap_or(&uri).to_string(),
+                                title: None,
+                                mime_type: mime_type.unwrap_or_default(),
                                 text,
-                                mime_type,
                             },
                         }
                     }
@@ -1016,7 +1017,7 @@ impl MCPClient {
         let mut servers_with_changes = Vec::new();
 
         for (server_name, current_prompts) in &current_prompts_by_server {
-            let previous_prompts = previous_prompts_cache.get(server_name);
+            let previous_prompts = previous_prompts_cache.get(server_name as &str);
 
             let prompts_changed = match previous_prompts {
                 Some(prev) => prev != current_prompts,
@@ -1870,33 +1871,35 @@ mod tests {
     async fn test_prompt_definition_creation() {
         let prompt = PromptDefinition {
             name: "test_prompt".to_string(),
+            title: None,
             description: Some("A test prompt".to_string()),
-            arguments: vec![PromptArgument {
+            arguments: Some(vec![PromptArgument {
                 name: "user_input".to_string(),
                 description: Some("User input for the prompt".to_string()),
-                required: true,
-            }],
+                required: Some(true),
+            }]),
             server_name: "test_server".to_string(),
         };
 
         assert_eq!(prompt.name, "test_prompt");
         assert_eq!(prompt.description, Some("A test prompt".to_string()));
         assert_eq!(prompt.server_name, "test_server");
-        assert_eq!(prompt.arguments.len(), 1);
-        assert_eq!(prompt.arguments[0].name, "user_input");
-        assert!(prompt.arguments[0].required);
+        assert_eq!(prompt.arguments.as_ref().unwrap().len(), 1);
+        assert_eq!(prompt.arguments.as_ref().unwrap()[0].name, "user_input");
+        assert_eq!(prompt.arguments.as_ref().unwrap()[0].required, Some(true));
     }
 
     #[tokio::test]
     async fn test_mock_server_prompt_functionality() {
         let prompts = vec![PromptDefinition {
             name: "code_review".to_string(),
+            title: None,
             description: Some("Review code for best practices".to_string()),
-            arguments: vec![PromptArgument {
+            arguments: Some(vec![PromptArgument {
                 name: "code".to_string(),
                 description: Some("The code to review".to_string()),
-                required: true,
-            }],
+                required: Some(true),
+            }]),
             server_name: "test_server".to_string(),
         }];
 
