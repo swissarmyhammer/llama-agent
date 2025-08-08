@@ -1,5 +1,5 @@
-use llama_agent::{
-    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, QueueConfig, Session,
+use llama_agent::types::{
+    AgentConfig, Message, MessageRole, ModelConfig, ModelSource, QueueConfig, RetryConfig, Session,
     SessionConfig, SessionId, ToolCall, ToolCallId, ToolDefinition, ToolResult,
 };
 use std::path::PathBuf;
@@ -22,6 +22,7 @@ impl TestHelper {
                 },
                 batch_size: 128,
                 use_hf_params: false,
+                retry_config: RetryConfig::default(),
             },
             queue_config: QueueConfig {
                 max_queue_size: 10,
@@ -140,6 +141,7 @@ impl TestHelper {
                 },
                 batch_size: 128,
                 use_hf_params: false,
+                retry_config: RetryConfig::default(),
             },
             queue_config: QueueConfig {
                 max_queue_size: 5,

@@ -7,7 +7,7 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, GenerationRequest, MCPServerConfig, Message, MessageRole,
-        ModelConfig, ModelSource, QueueConfig, SessionConfig, SessionId,
+        ModelConfig, ModelSource, QueueConfig, RetryConfig, SessionConfig, SessionId,
     },
     AgentServer,
 };
@@ -170,6 +170,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
             },
             batch_size: 512,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -191,6 +192,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
             },
             batch_size: 0, // Invalid
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -211,6 +213,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
             },
             batch_size: 512,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -232,6 +235,7 @@ async fn test_configuration_validation() -> Result<(), Box<dyn std::error::Error
             },
             batch_size: 512,
             use_hf_params: false,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -258,6 +262,7 @@ async fn test_agent_initialization() -> Result<(), Box<dyn std::error::Error>> {
             },
             batch_size: 512,
             use_hf_params: false,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -543,6 +548,7 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
             },
             batch_size: 1024, // Large batch
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig {
             max_queue_size: 1000, // Large queue
@@ -570,6 +576,7 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
             },
             batch_size: 256, // Smaller batch
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig {
             max_queue_size: 100,
@@ -597,6 +604,7 @@ async fn test_performance_configurations() -> Result<(), Box<dyn std::error::Err
             },
             batch_size: 128, // Small batch
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig {
             max_queue_size: 50, // Small queue

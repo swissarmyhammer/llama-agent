@@ -371,10 +371,34 @@ pub struct AgentConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryConfig {
+    /// Maximum number of retry attempts
+    pub max_retries: u32,
+    /// Initial delay between retries in milliseconds
+    pub initial_delay_ms: u64,
+    /// Multiplier for exponential backoff
+    pub backoff_multiplier: f64,
+    /// Maximum delay between retries in milliseconds
+    pub max_delay_ms: u64,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            initial_delay_ms: 1000, // 1 second
+            backoff_multiplier: 2.0,
+            max_delay_ms: 30000, // 30 seconds
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub source: ModelSource,
     pub batch_size: u32,
     pub use_hf_params: bool,
+    pub retry_config: RetryConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -420,6 +444,7 @@ impl Default for ModelConfig {
             },
             batch_size: 512,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         }
     }
 }
@@ -1088,6 +1113,7 @@ mod tests {
             },
             batch_size: 512,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         };
 
         assert!(config.validate().is_ok());
@@ -1102,6 +1128,7 @@ mod tests {
             },
             batch_size: 0,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         };
 
         assert!(config.validate().is_err());
@@ -1113,6 +1140,7 @@ mod tests {
             },
             batch_size: 10000,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         };
 
         assert!(config.validate().is_err());

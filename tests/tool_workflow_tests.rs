@@ -2,8 +2,8 @@ use llama_agent::{
     agent::AgentServer,
     types::{
         AgentAPI, AgentConfig, FinishReason, MCPServerConfig, Message, MessageRole, ModelConfig,
-        ModelSource, QueueConfig, Session, SessionConfig, SessionId, ToolCall, ToolCallId,
-        ToolDefinition, ToolResult,
+        ModelSource, QueueConfig, RetryConfig, Session, SessionConfig, SessionId, ToolCall,
+        ToolCallId, ToolDefinition, ToolResult,
     },
 };
 use serde_json::json;
@@ -31,6 +31,7 @@ async fn test_tool_call_detection() {
             },
             batch_size: 512,
             use_hf_params: false,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: Vec::new(),

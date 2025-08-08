@@ -1049,7 +1049,8 @@ impl Drop for RequestQueue {
 mod tests {
     use super::*;
     use crate::types::{
-        Message, MessageRole, ModelConfig, ModelError, ModelSource, QueueConfig, Session, SessionId,
+        Message, MessageRole, ModelConfig, ModelError, ModelSource, QueueConfig, RetryConfig,
+        Session, SessionId,
     };
     use std::path::PathBuf;
     use std::time::SystemTime;
@@ -1063,6 +1064,7 @@ mod tests {
             },
             batch_size: 512,
             use_hf_params: false,
+            retry_config: RetryConfig::default(),
         }
     }
 
@@ -1106,6 +1108,7 @@ mod tests {
             },
             batch_size: 512,
             use_hf_params: false,
+            retry_config: RetryConfig::default(),
         };
 
         let manager = Arc::new(ModelManager::new(config).expect("Failed to create ModelManager"));
