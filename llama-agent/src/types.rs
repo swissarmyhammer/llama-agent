@@ -770,7 +770,8 @@ pub trait AgentAPI {
 
     async fn get_session(&self, session_id: &SessionId) -> Result<Option<Session>, AgentError>;
 
-    async fn add_message(&self, session_id: &SessionId, message: Message) -> Result<(), AgentError>;
+    async fn add_message(&self, session_id: &SessionId, message: Message)
+        -> Result<(), AgentError>;
 
     async fn discover_tools(&self, session: &mut Session) -> Result<(), AgentError>;
 

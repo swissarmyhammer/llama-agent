@@ -733,7 +733,11 @@ impl AgentAPI for AgentServer {
         Ok(session)
     }
 
-    async fn add_message(&self, session_id: &SessionId, message: Message) -> Result<(), AgentError> {
+    async fn add_message(
+        &self,
+        session_id: &SessionId,
+        message: Message,
+    ) -> Result<(), AgentError> {
         self.session_manager
             .add_message(session_id, message)
             .await
