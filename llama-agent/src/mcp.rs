@@ -28,6 +28,7 @@ pub trait MCPServer: Send + Sync {
     async fn call_tool(&self, tool_name: &str, args: Value) -> Result<Value, MCPError>;
     async fn health(&self) -> Result<HealthStatus, MCPError>;
     async fn shutdown(&mut self) -> Result<(), MCPError>;
+    async fn notify_tools_list_changed(&mut self) -> Result<(), MCPError>;
     fn name(&self) -> &str;
 }
 
@@ -180,6 +181,45 @@ impl MCPServerImpl {
 
         Ok(())
     }
+
+    async fn send_notification(&mut self, method: &str, params: Value) -> Result<(), MCPError> {
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| MCPError::Connection("No stdin available".to_string()))?;
+
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params
+        });
+
+        let notification_str = serde_json::to_string(&notification)
+            .map_err(|e| MCPError::Protocol(format!("Failed to serialize notification: {}", e)))?;
+
+        debug!("Sending MCP notification: {}", notification_str);
+
+        stdin
+            .write_all(notification_str.as_bytes())
+            .await
+            .map_err(|e| MCPError::Connection(format!("Failed to write notification: {}", e)))?;
+        stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|e| MCPError::Connection(format!("Failed to write newline: {}", e)))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| MCPError::Connection(format!("Failed to flush: {}", e)))?;
+
+        Ok(())
+    }
+
+    async fn send_tools_list_changed(&mut self) -> Result<(), MCPError> {
+        debug!("Sending tools list changed notification");
+        self.send_notification("notifications/tools/list_changed", json!({}))
+            .await
+    }
 }
 
 #[async_trait]
@@ -207,7 +247,9 @@ impl MCPServer for MCPServerImpl {
         let init_params = json!({
             "protocolVersion": "2024-11-05",
             "capabilities": {
-                "tools": {}
+                "tools": {
+                    "listChanged": true
+                }
             },
             "clientInfo": {
                 "name": "llama-agent",
@@ -350,6 +392,21 @@ impl MCPServer for MCPServerImpl {
         Ok(())
     }
 
+    async fn notify_tools_list_changed(&mut self) -> Result<(), MCPError> {
+        if !self.initialized {
+            return Err(MCPError::Connection(format!(
+                "Server '{}' not initialized",
+                self.config.name
+            )));
+        }
+
+        debug!(
+            "Notifying tools list changed for server: {}",
+            self.config.name
+        );
+        self.send_tools_list_changed().await
+    }
+
     fn name(&self) -> &str {
         &self.config.name
     }
@@ -359,6 +416,7 @@ pub struct MCPClient {
     servers: ServerMap,
     retry_config: RetryConfig,
     tool_to_server_cache: Arc<RwLock<HashMap<String, String>>>,
+    previous_tools_cache: Arc<RwLock<HashMap<String, Vec<String>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -386,6 +444,7 @@ impl MCPClient {
             servers: Arc::new(RwLock::new(HashMap::new())),
             retry_config: RetryConfig::default(),
             tool_to_server_cache: Arc::new(RwLock::new(HashMap::new())),
+            previous_tools_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -394,6 +453,7 @@ impl MCPClient {
             servers: Arc::new(RwLock::new(HashMap::new())),
             retry_config,
             tool_to_server_cache: Arc::new(RwLock::new(HashMap::new())),
+            previous_tools_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -474,6 +534,11 @@ impl MCPClient {
             cache.retain(|_tool, server| server != server_name);
             drop(cache);
 
+            // Clear previous tools cache for this server
+            let mut previous_cache = self.previous_tools_cache.write().await;
+            previous_cache.remove(server_name);
+            drop(previous_cache);
+
             info!("Successfully removed MCP server: {}", server_name);
         } else {
             warn!(
@@ -492,6 +557,7 @@ impl MCPClient {
         let mut all_tools = Vec::new();
         let mut errors = Vec::new();
         let mut cache_updates = HashMap::new();
+        let mut current_tools_by_server = HashMap::new();
 
         for (server_name, server_arc) in servers.iter() {
             let server = server_arc.lock().await;
@@ -499,6 +565,10 @@ impl MCPClient {
             match server.list_tools().await {
                 Ok(mut tools) => {
                     debug!("Found {} tools from server '{}'", tools.len(), server_name);
+
+                    // Track current tools for this server
+                    let tool_names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+                    current_tools_by_server.insert(server_name.clone(), tool_names);
 
                     // Update cache mapping for each tool
                     for tool in &tools {
@@ -513,6 +583,54 @@ impl MCPClient {
                         server_name, e
                     );
                     errors.push(format!("Server '{}': {}", server_name, e));
+                }
+            }
+        }
+        drop(servers);
+
+        // Check for changes and send notifications
+        let mut previous_tools_cache = self.previous_tools_cache.write().await;
+        let mut servers_with_changes = Vec::new();
+
+        for (server_name, current_tools) in &current_tools_by_server {
+            let previous_tools = previous_tools_cache.get(server_name);
+
+            let tools_changed = match previous_tools {
+                Some(prev) => prev != current_tools,
+                None => !current_tools.is_empty(), // First time seeing this server with tools
+            };
+
+            if tools_changed {
+                debug!(
+                    "Tools changed for server '{}': {:?} -> {:?}",
+                    server_name, previous_tools, current_tools
+                );
+                servers_with_changes.push(server_name.clone());
+            }
+        }
+
+        // Update the previous tools cache
+        previous_tools_cache.clear();
+        previous_tools_cache.extend(current_tools_by_server);
+        drop(previous_tools_cache);
+
+        // Send notifications for servers with changes
+        if !servers_with_changes.is_empty() {
+            let servers = self.servers.read().await;
+            for server_name in servers_with_changes {
+                if let Some(server_arc) = servers.get(&server_name) {
+                    let mut server = server_arc.lock().await;
+                    if let Err(e) = server.notify_tools_list_changed().await {
+                        warn!(
+                            "Failed to send tools list changed notification for server '{}': {}",
+                            server_name, e
+                        );
+                    } else {
+                        info!(
+                            "Sent tools list changed notification for server '{}'",
+                            server_name
+                        );
+                    }
                 }
             }
         }
@@ -537,6 +655,7 @@ impl MCPClient {
             );
         }
 
+        let servers = self.servers.read().await;
         info!(
             "Discovered {} tools from {} servers",
             all_tools.len(),
@@ -867,6 +986,13 @@ mod tests {
             Ok(())
         }
 
+        async fn notify_tools_list_changed(&mut self) -> Result<(), MCPError> {
+            if self.should_fail {
+                return Err(MCPError::Protocol("Mock notification failure".to_string()));
+            }
+            Ok(())
+        }
+
         fn name(&self) -> &str {
             &self.name
         }
@@ -1101,5 +1227,88 @@ mod tests {
         assert!(matches!(protocol_error, MCPError::Protocol(_)));
         assert!(matches!(server_not_found, MCPError::ServerNotFound(_)));
         assert!(matches!(tool_call_failed, MCPError::ToolCallFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn test_tools_list_changed_notification() {
+        let tools = vec![ToolDefinition {
+            name: "test_tool".to_string(),
+            description: "A test tool".to_string(),
+            parameters: json!({"type": "object"}),
+            server_name: "test_server".to_string(),
+        }];
+
+        let mut server = MockMCPServer::new("test_server", tools);
+
+        // Test successful notification
+        assert!(server.notify_tools_list_changed().await.is_ok());
+
+        // Test failed notification
+        server.should_fail = true;
+        assert!(server.notify_tools_list_changed().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_tools_list_change_detection() {
+        let client = MCPClient::new();
+
+        // First discovery - should detect changes (empty -> some tools)
+        let _initial_tools = vec![ToolDefinition {
+            name: "tool1".to_string(),
+            description: "Tool 1".to_string(),
+            parameters: json!({"type": "object"}),
+            server_name: "server1".to_string(),
+        }];
+
+        // Simulate adding tools to the cache
+        {
+            let mut cache = client.previous_tools_cache.write().await;
+            cache.insert("server1".to_string(), vec!["tool1".to_string()]);
+        }
+
+        // Second discovery with same tools - should not detect changes
+        {
+            let cache = client.previous_tools_cache.read().await;
+            let previous = cache.get("server1");
+            let current = vec!["tool1".to_string()];
+            assert_eq!(previous, Some(&current));
+        }
+
+        // Third discovery with different tools - should detect changes
+        let new_tools = vec!["tool1".to_string(), "tool2".to_string()];
+        {
+            let cache = client.previous_tools_cache.read().await;
+            let previous = cache.get("server1");
+            assert_ne!(previous, Some(&new_tools));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mcp_client_with_previous_tools_cache() {
+        let client = MCPClient::new();
+
+        // Test that previous tools cache is properly initialized
+        {
+            let cache = client.previous_tools_cache.read().await;
+            assert!(cache.is_empty());
+        }
+
+        // Test manual cache updates
+        {
+            let mut cache = client.previous_tools_cache.write().await;
+            cache.insert(
+                "test_server".to_string(),
+                vec!["tool1".to_string(), "tool2".to_string()],
+            );
+        }
+
+        {
+            let cache = client.previous_tools_cache.read().await;
+            assert_eq!(cache.len(), 1);
+            assert_eq!(
+                cache.get("test_server"),
+                Some(&vec!["tool1".to_string(), "tool2".to_string()])
+            );
+        }
     }
 }

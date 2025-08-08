@@ -26,7 +26,10 @@ fn set_logging_suppression(suppress: bool) {
     unsafe {
         // Access the raw FFI binding
         extern "C" {
-            fn llama_log_set(log_callback: Option<extern "C" fn(i32, *const c_char, *mut c_void)>, user_data: *mut c_void);
+            fn llama_log_set(
+                log_callback: Option<extern "C" fn(i32, *const c_char, *mut c_void)>,
+                user_data: *mut c_void,
+            );
         }
 
         if suppress {
@@ -243,7 +246,9 @@ impl ModelManager {
 
         let result = model
             .new_context(&self.backend, context_params)
-            .map_err(move |e| ModelError::LoadingFailed(format!("Failed to create context: {}", e)));
+            .map_err(move |e| {
+                ModelError::LoadingFailed(format!("Failed to create context: {}", e))
+            });
 
         // Restore default logging after context creation
         if !self.config.verbose_logging {
@@ -388,13 +393,14 @@ impl ModelManager {
         // Set logging suppression based on verbose_logging flag
         set_logging_suppression(!self.config.verbose_logging);
 
-        let model = LlamaModel::load_from_file(&self.backend, model_path, &model_params).map_err(|e| {
-            ModelError::LoadingFailed(format!(
-                "Failed to load model from {}: {}",
-                model_path.display(),
-                e
-            ))
-        })?;
+        let model =
+            LlamaModel::load_from_file(&self.backend, model_path, &model_params).map_err(|e| {
+                ModelError::LoadingFailed(format!(
+                    "Failed to load model from {}: {}",
+                    model_path.display(),
+                    e
+                ))
+            })?;
 
         // Restore default logging after model loading
         if !self.config.verbose_logging {
@@ -577,6 +583,7 @@ mod tests {
             source: ModelSource::Local { folder, filename },
             batch_size: 512,
             use_hf_params: false,
+            verbose_logging: false,
         }
     }
 
@@ -585,6 +592,7 @@ mod tests {
             source: ModelSource::HuggingFace { repo, filename },
             batch_size: 512,
             use_hf_params: true,
+            verbose_logging: false,
         }
     }
 
