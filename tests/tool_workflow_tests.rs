@@ -2,8 +2,8 @@ use llama_agent::{
     agent::AgentServer,
     types::{
         AgentAPI, AgentConfig, FinishReason, MCPServerConfig, Message, MessageRole, ModelConfig,
-        ModelSource, QueueConfig, Session, SessionConfig, SessionId,
-        ToolCall, ToolCallId, ToolDefinition, ToolResult,
+        ModelSource, QueueConfig, Session, SessionConfig, SessionId, ToolCall, ToolCallId,
+        ToolDefinition, ToolResult,
     },
 };
 use serde_json::json;
