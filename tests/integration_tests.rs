@@ -377,7 +377,11 @@ async fn test_timeout_scenarios() {
                 stop_tokens: vec![],
             };
 
-            let result = timeout(Duration::from_millis(100), queue.submit_request(request, &session)).await;
+            let result = timeout(
+                Duration::from_millis(100),
+                queue.submit_request(request, &session),
+            )
+            .await;
             assert!(result.is_ok()); // Timeout should complete, but request should fail
 
             match result.unwrap() {

@@ -1213,7 +1213,10 @@ mod tests {
             stop_tokens: Vec::new(),
         };
 
-        let mut receiver = queue.submit_streaming_request(request, &session).await.unwrap();
+        let mut receiver = queue
+            .submit_streaming_request(request, &session)
+            .await
+            .unwrap();
 
         // Should receive an error since streaming is not yet implemented
         let chunk_result = receiver.recv().await;

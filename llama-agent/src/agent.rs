@@ -305,7 +305,11 @@ impl AgentServer {
     }
 
     /// Comprehensive security validation for generation requests
-    fn validate_generation_request_with_session(&self, request: &GenerationRequest, session: &Session) -> Result<(), AgentError> {
+    fn validate_generation_request_with_session(
+        &self,
+        request: &GenerationRequest,
+        session: &Session,
+    ) -> Result<(), AgentError> {
         // Validate session has messages
         if session.messages.is_empty() {
             return Err(AgentError::Session(
@@ -532,10 +536,15 @@ impl AgentAPI for AgentServer {
         );
 
         // Get session from session manager
-        let session = self.session_manager.get_session(&request.session_id).await?
-            .ok_or_else(|| AgentError::Session(
-                crate::types::SessionError::NotFound(request.session_id.to_string())
-            ))?;
+        let session = self
+            .session_manager
+            .get_session(&request.session_id)
+            .await?
+            .ok_or_else(|| {
+                AgentError::Session(crate::types::SessionError::NotFound(
+                    request.session_id.to_string(),
+                ))
+            })?;
 
         // Security: Validate input before processing
         self.validate_generation_request_with_session(&request, &session)?;
@@ -571,7 +580,10 @@ impl AgentAPI for AgentServer {
             };
 
             // Submit to request queue
-            let response = self.request_queue.submit_request(current_request, &working_session).await?;
+            let response = self
+                .request_queue
+                .submit_request(current_request, &working_session)
+                .await?;
 
             accumulated_response.push_str(&response.generated_text);
             total_tokens += response.tokens_generated;
@@ -667,10 +679,15 @@ impl AgentAPI for AgentServer {
         );
 
         // Get session from session manager
-        let session = self.session_manager.get_session(&request.session_id).await?
-            .ok_or_else(|| AgentError::Session(
-                crate::types::SessionError::NotFound(request.session_id.to_string())
-            ))?;
+        let session = self
+            .session_manager
+            .get_session(&request.session_id)
+            .await?
+            .ok_or_else(|| {
+                AgentError::Session(crate::types::SessionError::NotFound(
+                    request.session_id.to_string(),
+                ))
+            })?;
 
         // Security: Validate input before processing
         self.validate_generation_request_with_session(&request, &session)?;
