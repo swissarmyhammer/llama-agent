@@ -305,9 +305,9 @@ impl AgentServer {
     }
 
     /// Comprehensive security validation for generation requests
-    fn validate_generation_request(&self, request: &GenerationRequest) -> Result<(), AgentError> {
+    fn validate_generation_request_with_session(&self, request: &GenerationRequest, session: &Session) -> Result<(), AgentError> {
         // Validate session has messages
-        if request.session.messages.is_empty() {
+        if session.messages.is_empty() {
             return Err(AgentError::Session(
                 crate::types::SessionError::InvalidState(
                     "Session must have at least one message for generation".to_string(),
@@ -316,7 +316,7 @@ impl AgentServer {
         }
 
         // Security: Validate message content length and content
-        for (i, message) in request.session.messages.iter().enumerate() {
+        for (i, message) in session.messages.iter().enumerate() {
             // DoS protection: limit message size
             if message.content.len() > 100_000 {
                 return Err(AgentError::Session(
@@ -528,13 +528,19 @@ impl AgentAPI for AgentServer {
     async fn generate(&self, request: GenerationRequest) -> Result<GenerationResponse, AgentError> {
         debug!(
             "Processing generation request for session: {}",
-            request.session.id
+            request.session_id
         );
 
-        // Security: Validate input before processing
-        self.validate_generation_request(&request)?;
+        // Get session from session manager
+        let session = self.session_manager.get_session(&request.session_id).await?
+            .ok_or_else(|| AgentError::Session(
+                crate::types::SessionError::NotFound(request.session_id.to_string())
+            ))?;
 
-        let mut working_session = request.session.clone();
+        // Security: Validate input before processing
+        self.validate_generation_request_with_session(&request, &session)?;
+
+        let mut working_session = session;
         let mut accumulated_response = String::new();
         let mut total_tokens = 0u32;
         let mut iterations = 0;
@@ -557,7 +563,7 @@ impl AgentAPI for AgentServer {
 
             // Create generation request with current session state
             let current_request = GenerationRequest {
-                session: working_session.clone(),
+                session_id: working_session.id.clone(),
                 max_tokens: request.max_tokens,
                 temperature: request.temperature,
                 top_p: request.top_p,
@@ -565,7 +571,7 @@ impl AgentAPI for AgentServer {
             };
 
             // Submit to request queue
-            let response = self.request_queue.submit_request(current_request).await?;
+            let response = self.request_queue.submit_request(current_request, &working_session).await?;
 
             accumulated_response.push_str(&response.generated_text);
             total_tokens += response.tokens_generated;
@@ -657,20 +663,35 @@ impl AgentAPI for AgentServer {
     {
         debug!(
             "Processing streaming generation request for session: {}",
-            request.session.id
+            request.session_id
         );
 
+        // Get session from session manager
+        let session = self.session_manager.get_session(&request.session_id).await?
+            .ok_or_else(|| AgentError::Session(
+                crate::types::SessionError::NotFound(request.session_id.to_string())
+            ))?;
+
         // Security: Validate input before processing
-        self.validate_generation_request(&request)?;
+        self.validate_generation_request_with_session(&request, &session)?;
 
         // Render session to prompt
-        let prompt = self.render_session_prompt(&request.session).await?;
+        let prompt = self.render_session_prompt(&session).await?;
         debug!("Session rendered to prompt: {} characters", prompt.len());
+
+        // Create streaming request
+        let streaming_request = GenerationRequest {
+            session_id: request.session_id,
+            max_tokens: request.max_tokens,
+            temperature: request.temperature,
+            top_p: request.top_p,
+            stop_tokens: request.stop_tokens,
+        };
 
         // Submit to request queue for streaming
         let receiver = self
             .request_queue
-            .submit_streaming_request(request)
+            .submit_streaming_request(streaming_request, &session)
             .await
             .map_err(AgentError::Queue)?;
 

@@ -175,7 +175,7 @@ pub struct ToolDefinition {
 
 #[derive(Debug)]
 pub struct GenerationRequest {
-    pub session: Session,
+    pub session_id: SessionId,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
@@ -874,7 +874,7 @@ mod tests {
         };
 
         let request = GenerationRequest {
-            session,
+            session_id: session.id.clone(),
             max_tokens: Some(100),
             temperature: Some(0.7),
             top_p: Some(0.9),

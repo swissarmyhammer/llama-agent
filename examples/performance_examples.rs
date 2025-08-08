@@ -447,7 +447,7 @@ async fn benchmark_real_performance(
             });
 
             let request = GenerationRequest {
-                session,
+                session_id: session.id.clone(),
                 max_tokens: Some(100),
                 temperature: Some(0.7),
                 top_p: Some(0.9),

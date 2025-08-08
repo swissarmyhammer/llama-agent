@@ -144,6 +144,7 @@ pub struct QueueStats {
 pub struct QueuedRequest {
     pub id: String,
     pub request: GenerationRequest,
+    pub session: Session,
     pub response_sender: oneshot::Sender<Result<GenerationResponse, QueueError>>,
     pub stream_sender: Option<mpsc::Sender<Result<StreamChunk, QueueError>>>,
     pub submitted_at: Instant,
@@ -208,12 +209,14 @@ impl RequestQueue {
     pub async fn submit_request(
         &self,
         request: GenerationRequest,
+        session: &Session,
     ) -> Result<GenerationResponse, QueueError> {
         let (response_sender, response_receiver) = oneshot::channel();
 
         let queued_request = QueuedRequest {
             id: Ulid::new().to_string(),
             request,
+            session: session.clone(),
             response_sender,
             stream_sender: None,
             submitted_at: Instant::now(),
@@ -251,6 +254,7 @@ impl RequestQueue {
     pub async fn submit_streaming_request(
         &self,
         request: GenerationRequest,
+        session: &Session,
     ) -> Result<mpsc::Receiver<Result<StreamChunk, QueueError>>, QueueError> {
         let (response_sender, _) = oneshot::channel();
         let (stream_sender, stream_receiver) = mpsc::channel(100);
@@ -258,6 +262,7 @@ impl RequestQueue {
         let queued_request = QueuedRequest {
             id: Ulid::new().to_string(),
             request,
+            session: session.clone(),
             response_sender,
             stream_sender: Some(stream_sender),
             submitted_at: Instant::now(),
@@ -392,6 +397,7 @@ impl RequestQueue {
                         worker_id,
                         request_id.clone(),
                         &queued_request.request,
+                        &queued_request.session,
                         model,
                         &model_manager,
                         stream_sender.clone(),
@@ -424,6 +430,7 @@ impl RequestQueue {
                         worker_id,
                         request_id.clone(),
                         &queued_request.request,
+                        &queued_request.session,
                         model,
                         &model_manager,
                         &queued_request.cancellation_token,
@@ -470,6 +477,7 @@ impl RequestQueue {
         worker_id: usize,
         request_id: String,
         request: &GenerationRequest,
+        session: &Session,
         model: &LlamaModel,
         model_manager: &ModelManager,
         cancellation_token: &CancellationToken,
@@ -483,7 +491,7 @@ impl RequestQueue {
         );
 
         // Format the session messages into a prompt
-        let prompt = Self::format_session_prompt(&request.session)?;
+        let prompt = Self::format_session_prompt(session)?;
         debug!("Formatted prompt: {}", prompt);
 
         // Create context for this inference
@@ -703,6 +711,7 @@ impl RequestQueue {
         worker_id: usize,
         request_id: String,
         request: &GenerationRequest,
+        session: &Session,
         model: &LlamaModel,
         model_manager: &ModelManager,
         stream_sender: mpsc::Sender<Result<StreamChunk, QueueError>>,
@@ -717,7 +726,7 @@ impl RequestQueue {
         );
 
         // Format the session messages into a prompt
-        let prompt = Self::format_session_prompt(&request.session)?;
+        let prompt = Self::format_session_prompt(session)?;
         debug!("Formatted prompt for streaming: {}", prompt);
 
         // Create context for this inference
@@ -1150,15 +1159,16 @@ mod tests {
         let config = create_test_queue_config();
         let queue = RequestQueue::new(model_manager, config);
 
+        let session = create_test_session();
         let request = GenerationRequest {
-            session: create_test_session(),
+            session_id: session.id.clone(),
             max_tokens: Some(100),
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: Vec::new(),
         };
 
-        let result = queue.submit_request(request).await;
+        let result = queue.submit_request(request, &session).await;
         assert!(matches!(result, Err(QueueError::WorkerError(_))));
     }
 
@@ -1168,15 +1178,16 @@ mod tests {
         let config = create_test_queue_config();
         let queue = RequestQueue::new(model_manager, config);
 
+        let session = create_test_session();
         let request = GenerationRequest {
-            session: create_test_session(),
+            session_id: session.id.clone(),
             max_tokens: Some(100),
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: Vec::new(),
         };
 
-        let result = queue.submit_request(request).await;
+        let result = queue.submit_request(request, &session).await;
         // Should fail because model is not actually loaded in test setup
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -1193,15 +1204,16 @@ mod tests {
         let config = create_test_queue_config();
         let queue = RequestQueue::new(model_manager, config);
 
+        let session = create_test_session();
         let request = GenerationRequest {
-            session: create_test_session(),
+            session_id: session.id.clone(),
             max_tokens: Some(100),
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: Vec::new(),
         };
 
-        let mut receiver = queue.submit_streaming_request(request).await.unwrap();
+        let mut receiver = queue.submit_streaming_request(request, &session).await.unwrap();
 
         // Should receive an error since streaming is not yet implemented
         let chunk_result = receiver.recv().await;
@@ -1229,15 +1241,16 @@ mod tests {
         };
         let queue = RequestQueue::new(model_manager, config);
 
+        let session = create_test_session();
         let request = GenerationRequest {
-            session: create_test_session(),
+            session_id: session.id.clone(),
             max_tokens: Some(100),
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: Vec::new(),
         };
 
-        let result = queue.submit_request(request).await;
+        let result = queue.submit_request(request, &session).await;
         // Should fail because model is not loaded, not due to timeout in this test setup
         assert!(result.is_err());
         // The error should be WorkerError about model not loaded, not timeout
@@ -1255,15 +1268,17 @@ mod tests {
     #[test]
     fn test_queued_request_debug() {
         let (sender, _) = oneshot::channel();
+        let session = create_test_session();
         let request = QueuedRequest {
             id: "test-123".to_string(),
             request: GenerationRequest {
-                session: create_test_session(),
+                session_id: session.id.clone(),
                 max_tokens: Some(100),
                 temperature: Some(0.7),
                 top_p: Some(0.9),
                 stop_tokens: Vec::new(),
             },
+            session,
             response_sender: sender,
             stream_sender: None,
             submitted_at: Instant::now(),

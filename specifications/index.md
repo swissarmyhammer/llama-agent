@@ -169,7 +169,7 @@ pub struct Session {
 
 #[derive(Debug)]
 pub struct GenerationRequest {
-    pub session: Session,
+    pub session_id: SessionId,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
@@ -381,14 +381,16 @@ impl RequestQueue {
     
     pub async fn submit_request(
         &self, 
-        request: GenerationRequest
+        request: GenerationRequest,
+        session: &Session
     ) -> Result<GenerationResponse, AgentError> {
         // Submit request to queue and await response
     }
     
     pub async fn submit_streaming_request(
         &self, 
-        request: GenerationRequest
+        request: GenerationRequest,
+        session: &Session
     ) -> Result<impl Stream<Item = Result<StreamChunk, AgentError>>, AgentError> {
         // Submit streaming request to queue
     }
@@ -656,7 +658,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Generate response
     let request = GenerationRequest {
-        session: session.clone(),
+        session_id: session.id.clone(),
         max_tokens: Some(100),
         temperature: Some(0.7),
         top_p: Some(0.9),
@@ -689,7 +691,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             // Generate final response with tool results
             let final_request = GenerationRequest {
-                session: session.clone(),
+                session_id: session.id.clone(),
                 max_tokens: Some(100),
                 temperature: Some(0.7),
                 top_p: Some(0.9),

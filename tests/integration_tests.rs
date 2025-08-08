@@ -368,15 +368,16 @@ async fn test_timeout_scenarios() {
                 config.queue_config,
             );
 
+            let session = TestHelper::sample_session();
             let request = GenerationRequest {
-                session: TestHelper::sample_session(),
+                session_id: session.id.clone(),
                 max_tokens: Some(100),
                 temperature: Some(0.7),
                 top_p: Some(0.9),
                 stop_tokens: vec![],
             };
 
-            let result = timeout(Duration::from_millis(100), queue.submit_request(request)).await;
+            let result = timeout(Duration::from_millis(100), queue.submit_request(request, &session)).await;
             assert!(result.is_ok()); // Timeout should complete, but request should fail
 
             match result.unwrap() {
