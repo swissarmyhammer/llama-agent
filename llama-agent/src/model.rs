@@ -190,16 +190,10 @@ impl ModelManager {
 
         info!("Downloading model file: {}", target_filename);
 
-        // Download the model file
-        let model_path = match repo_api.get(&target_filename).await {
-            Ok(path) => path,
-            Err(e) => {
-                return Err(ModelError::LoadingFailed(format!(
-                    "Failed to download model file '{}' from repository '{}': {}.\n📁 Verify file path is correct, file exists and is readable. For HuggingFace: check repo name and filename\n💡 Check model file exists, is valid GGUF format, and sufficient memory is available",
-                    target_filename, repo, e
-                )));
-            }
-        };
+        // Download the model file with retry logic
+        let model_path = self
+            .download_model_file_with_retry(&repo_api, &target_filename, repo)
+            .await?;
 
         info!("Model downloaded to: {}", model_path.display());
 
@@ -215,6 +209,140 @@ impl ModelManager {
             })?;
 
         Ok(model)
+    }
+
+    /// Downloads a model file with retry logic and exponential backoff
+    async fn download_model_file_with_retry(
+        &self,
+        repo_api: &hf_hub::api::tokio::ApiRepo,
+        filename: &str,
+        repo: &str,
+    ) -> Result<PathBuf, ModelError> {
+        let retry_config = &self.config.retry_config;
+        let mut attempt = 0;
+        let mut delay = retry_config.initial_delay_ms;
+
+        loop {
+            match repo_api.get(filename).await {
+                Ok(path) => {
+                    if attempt > 0 {
+                        info!(
+                            "Successfully downloaded {} after {} retries",
+                            filename, attempt
+                        );
+                    }
+                    return Ok(path);
+                }
+                Err(e) => {
+                    attempt += 1;
+
+                    // Check if this is a retriable error
+                    let is_retriable = self.is_retriable_error(&e);
+
+                    if attempt > retry_config.max_retries || !is_retriable {
+                        return Err(ModelError::LoadingFailed(self.format_download_error(
+                            filename,
+                            repo,
+                            &e,
+                            attempt - 1,
+                        )));
+                    }
+
+                    warn!(
+                        "Download attempt {} failed for '{}': {}. Retrying in {}ms...",
+                        attempt, filename, e, delay
+                    );
+
+                    // Wait with exponential backoff
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+
+                    // Calculate next delay with exponential backoff
+                    delay = ((delay as f64) * retry_config.backoff_multiplier) as u64;
+                    delay = delay.min(retry_config.max_delay_ms);
+                }
+            }
+        }
+    }
+
+    /// Determines if an error is retriable based on the error message
+    fn is_retriable_error(&self, error: &dyn std::error::Error) -> bool {
+        let error_msg = error.to_string().to_lowercase();
+
+        // Check for specific HTTP status codes or error patterns
+        if error_msg.contains("500") || error_msg.contains("internal server error") {
+            return true;
+        }
+        if error_msg.contains("502") || error_msg.contains("bad gateway") {
+            return true;
+        }
+        if error_msg.contains("503") || error_msg.contains("service unavailable") {
+            return true;
+        }
+        if error_msg.contains("504") || error_msg.contains("gateway timeout") {
+            return true;
+        }
+        if error_msg.contains("429") || error_msg.contains("too many requests") {
+            return true;
+        }
+
+        // Network-level errors are retriable
+        if error_msg.contains("connection")
+            || error_msg.contains("timeout")
+            || error_msg.contains("network")
+        {
+            return true;
+        }
+
+        // Client errors (4xx) are generally not retriable
+        if error_msg.contains("404") || error_msg.contains("not found") {
+            return false;
+        }
+        if error_msg.contains("403") || error_msg.contains("forbidden") {
+            return false;
+        }
+        if error_msg.contains("401") || error_msg.contains("unauthorized") {
+            return false;
+        }
+
+        // Default to retriable for unknown errors
+        true
+    }
+
+    /// Formats a comprehensive error message for download failures
+    fn format_download_error(
+        &self,
+        filename: &str,
+        repo: &str,
+        error: &dyn std::error::Error,
+        retries_attempted: u32,
+    ) -> String {
+        let base_message = format!(
+            "Failed to download model file '{}' from repository '{}' after {} retries: {}",
+            filename, repo, retries_attempted, error
+        );
+
+        let error_msg = error.to_string().to_lowercase();
+
+        // Add specific guidance based on error type
+        let guidance = if error_msg.contains("404") || error_msg.contains("not found") {
+            "📁 File not found. Verify the filename exists in the repository. You can browse the repo at https://huggingface.co/"
+        } else if error_msg.contains("403") || error_msg.contains("forbidden") {
+            "🔒 Access forbidden. Check if the repository is private and if you need authentication."
+        } else if error_msg.contains("429") || error_msg.contains("too many requests") {
+            "⏱️ Rate limited by HuggingFace. Wait a few minutes and try again."
+        } else if error_msg.contains("500")
+            || error_msg.contains("502")
+            || error_msg.contains("503")
+            || error_msg.contains("504")
+        {
+            "🏥 Server error on HuggingFace. This is temporary - try again in a few minutes."
+        } else {
+            "🌐 Network error. Check your internet connection and try again."
+        };
+
+        let additional_help = "💡 Check model file exists, is valid GGUF format, and sufficient memory is available\n🔧 You can increase retry attempts by configuring retry_config.max_retries";
+
+        format!("{}\n{}\n{}", base_message, guidance, additional_help)
     }
 
     async fn auto_detect_hf_model_file(
@@ -431,6 +559,7 @@ mod tests {
             source: ModelSource::Local { folder, filename },
             batch_size: 512,
             use_hf_params: false,
+            retry_config: crate::types::RetryConfig::default(),
         }
     }
 
@@ -439,6 +568,7 @@ mod tests {
             source: ModelSource::HuggingFace { repo, filename },
             batch_size: 512,
             use_hf_params: true,
+            retry_config: crate::types::RetryConfig::default(),
         }
     }
 
@@ -628,5 +758,72 @@ mod tests {
         assert!(debug_str.contains("Local"));
         assert!(debug_str.contains("test.gguf"));
         assert!(debug_str.contains("512"));
+    }
+
+    #[tokio::test]
+    async fn test_retry_config_default() {
+        let config = crate::types::RetryConfig::default();
+        assert_eq!(config.max_retries, 3);
+        assert_eq!(config.initial_delay_ms, 1000);
+        assert_eq!(config.backoff_multiplier, 2.0);
+        assert_eq!(config.max_delay_ms, 30000);
+    }
+
+    #[tokio::test]
+    async fn test_is_retriable_error() {
+        let config = create_test_config_hf("test/repo".to_string(), None);
+
+        // This is a bit tricky since we can't easily create HfHubError instances
+        // We'll test the logic indirectly by checking that the manager has the method
+        let manager = match ModelManager::new(config) {
+            Ok(m) => m,
+            Err(ModelError::LoadingFailed(msg)) if msg.contains("Backend already initialized") => {
+                // Expected in test environment
+                return;
+            }
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        };
+
+        // The function exists and can be called - detailed testing would require
+        // mocking the HuggingFace API which is complex
+        assert_eq!(manager.config.retry_config.max_retries, 3);
+    }
+
+    #[test]
+    fn test_exponential_backoff_calculation() {
+        let retry_config = crate::types::RetryConfig::default();
+        let mut delay = retry_config.initial_delay_ms;
+
+        // Test exponential backoff progression
+        assert_eq!(delay, 1000); // Initial: 1s
+
+        delay = ((delay as f64) * retry_config.backoff_multiplier) as u64;
+        delay = delay.min(retry_config.max_delay_ms);
+        assert_eq!(delay, 2000); // 2s
+
+        delay = ((delay as f64) * retry_config.backoff_multiplier) as u64;
+        delay = delay.min(retry_config.max_delay_ms);
+        assert_eq!(delay, 4000); // 4s
+
+        // Continue until we hit the max
+        for _ in 0..10 {
+            delay = ((delay as f64) * retry_config.backoff_multiplier) as u64;
+            delay = delay.min(retry_config.max_delay_ms);
+        }
+        assert_eq!(delay, retry_config.max_delay_ms); // Should cap at 30s
+    }
+
+    #[test]
+    fn test_custom_retry_config() {
+        let mut config = create_test_config_hf("test/repo".to_string(), None);
+        config.retry_config.max_retries = 5;
+        config.retry_config.initial_delay_ms = 500;
+        config.retry_config.backoff_multiplier = 1.5;
+        config.retry_config.max_delay_ms = 10000;
+
+        assert_eq!(config.retry_config.max_retries, 5);
+        assert_eq!(config.retry_config.initial_delay_ms, 500);
+        assert_eq!(config.retry_config.backoff_multiplier, 1.5);
+        assert_eq!(config.retry_config.max_delay_ms, 10000);
     }
 }

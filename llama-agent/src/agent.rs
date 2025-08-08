@@ -883,7 +883,7 @@ impl AgentAPI for AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ModelConfig, ModelSource, QueueConfig, SessionConfig};
+    use crate::types::{ModelConfig, ModelSource, QueueConfig, RetryConfig, SessionConfig};
 
     fn create_test_config() -> AgentConfig {
         use tempfile::TempDir;
@@ -897,6 +897,7 @@ mod tests {
                 },
                 batch_size: 512,
                 use_hf_params: false,
+                retry_config: RetryConfig::default(),
             },
             queue_config: QueueConfig::default(),
             mcp_servers: Vec::new(),
@@ -962,6 +963,7 @@ mod tests {
             },
             batch_size: 512,
             use_hf_params: false,
+            retry_config: RetryConfig::default(),
         };
 
         let valid_config = AgentConfig {

@@ -7,7 +7,7 @@ use futures::StreamExt;
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, GenerationRequest, Message, MessageRole, ModelConfig, ModelSource,
-        QueueConfig, SessionConfig,
+        QueueConfig, RetryConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -31,6 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             batch_size: 512,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig {
             max_queue_size: 100,

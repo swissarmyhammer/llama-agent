@@ -10,7 +10,7 @@ use llama_agent::{
     chat_template::ChatTemplateEngine,
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, QueueConfig, SessionConfig,
+        MessageRole, ModelConfig, ModelSource, QueueConfig, RetryConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -32,6 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             batch_size: 512,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig {
             max_queue_size: 100,

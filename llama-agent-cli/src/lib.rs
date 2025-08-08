@@ -4,7 +4,7 @@ use futures::StreamExt;
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, Message, MessageRole, ModelConfig,
-        ModelSource, QueueConfig, SessionConfig,
+        ModelSource, QueueConfig, RetryConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -216,6 +216,7 @@ pub async fn run_agent(args: Args) -> Result<String> {
             },
             batch_size: args.batch_size,
             use_hf_params: false,
+            retry_config: RetryConfig::default(),
         }
     } else {
         // Assume HuggingFace repo
@@ -226,6 +227,7 @@ pub async fn run_agent(args: Args) -> Result<String> {
             },
             batch_size: args.batch_size,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         }
     };
 

@@ -2,7 +2,7 @@ mod common;
 
 use common::TestHelper;
 use llama_agent::types::*;
-use llama_agent::*;
+use llama_agent::AgentServer;
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -303,6 +303,7 @@ async fn test_error_handling_paths() {
             },
             batch_size: 512,
             use_hf_params: false,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -320,6 +321,7 @@ async fn test_error_handling_paths() {
             },
             batch_size: 512,
             use_hf_params: false,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],

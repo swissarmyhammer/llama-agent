@@ -13,7 +13,7 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, QueueConfig, SessionConfig,
+        MessageRole, ModelConfig, ModelSource, QueueConfig, RetryConfig, SessionConfig,
     },
     AgentServer,
 };
@@ -68,6 +68,7 @@ async fn demonstrate_invalid_model_config() -> Result<(), Box<dyn std::error::Er
             },
             batch_size: 512,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -89,6 +90,7 @@ async fn demonstrate_invalid_model_config() -> Result<(), Box<dyn std::error::Er
             },
             batch_size: 512,
             use_hf_params: false,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -110,6 +112,7 @@ async fn demonstrate_invalid_model_config() -> Result<(), Box<dyn std::error::Er
             },
             batch_size: 0, // Invalid batch size
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![],
@@ -137,6 +140,7 @@ async fn demonstrate_mcp_server_failures() -> Result<(), Box<dyn std::error::Err
             },
             batch_size: 512,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig::default(),
         mcp_servers: vec![
@@ -205,6 +209,7 @@ async fn demonstrate_generation_errors() -> Result<(), Box<dyn std::error::Error
             },
             batch_size: 512,
             use_hf_params: true,
+            retry_config: RetryConfig::default(),
         },
         queue_config: QueueConfig {
             max_queue_size: 10,

@@ -7,3 +7,26 @@ Model Error: Failed to initialize agent: Model error: Model loading failed: Fail
 💡 Check model file exists, is valid GGUF format, and sufficient memory is available
 🔧 Check available memory (4-8GB needed), verify GGUF file integrity, ensure compatible llama.cpp version
 💡 Check model file exists, is valid GGUF format, and sufficient memory is available
+
+
+## Proposed Solution
+
+After analyzing the issue, the HTTP 500 error is occurring during HuggingFace model download. The current error handling provides basic feedback but lacks retry mechanisms and more specific guidance for transient network issues.
+
+### Root Cause
+The error is happening in `/Users/wballard/github/llama-agent/llama-agent/src/model.rs:194-202` where `repo_api.get(&target_filename).await` fails with an HTTP 500 server error. This is likely a transient server issue on HuggingFace's infrastructure.
+
+### Implementation Plan
+1. **Add retry logic with exponential backoff** for HTTP download failures
+2. **Improve error messaging** to distinguish between client errors (404, authentication) and server errors (500, 503)
+3. **Add configurable retry parameters** to ModelConfig
+4. **Implement better fallback mechanisms** when downloads fail
+5. **Add download progress indication** for large model files
+
+### Changes Required
+1. Update `ModelConfig` to include retry configuration
+2. Enhance `load_huggingface_model` method with retry logic 
+3. Improve error messages to be more actionable for users
+4. Add unit tests for retry scenarios
+
+This will make the CLI more resilient to transient network issues and provide better user experience when model downloads fail.
