@@ -1,4 +1,5 @@
 use crate::types::{ModelConfig, ModelError, ModelSource};
+use hf_hub::api::tokio::ApiBuilder;
 use llama_cpp_2::{
     context::{params::LlamaContextParams, LlamaContext},
     llama_backend::LlamaBackend,
@@ -8,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 static GLOBAL_BACKEND: OnceLock<Arc<LlamaBackend>> = OnceLock::new();
 
@@ -153,15 +154,109 @@ impl ModelManager {
         repo: &str,
         filename: Option<&str>,
     ) -> Result<LlamaModel, ModelError> {
-        // For now, HuggingFace integration is not available in llama-cpp-2
-        // We'll treat the repo as a local path as fallback
-        info!(
-            "HuggingFace integration not available, treating repo as local path: {}",
-            repo
-        );
+        info!("Loading HuggingFace model: {}", repo);
 
-        let repo_path = PathBuf::from(repo);
-        self.load_local_model(&repo_path, filename).await
+        // Create HuggingFace API client
+        let api = match ApiBuilder::new().build() {
+            Ok(api) => api,
+            Err(e) => {
+                warn!(
+                    "Failed to create HuggingFace API client, falling back to local path: {}",
+                    e
+                );
+                let repo_path = PathBuf::from(repo);
+                return self.load_local_model(&repo_path, filename).await;
+            }
+        };
+
+        let repo_api = api.model(repo.to_string());
+
+        // Determine which file to download
+        let target_filename = if let Some(filename) = filename {
+            filename.to_string()
+        } else {
+            // Auto-detect the model file by listing repository files
+            match self.auto_detect_hf_model_file(&repo_api).await {
+                Ok(detected_filename) => detected_filename,
+                Err(e) => {
+                    warn!("Failed to auto-detect model file: {}", e);
+                    return Err(ModelError::NotFound(format!(
+                        "Could not auto-detect model file in repository: {}. Please specify --filename",
+                        repo
+                    )));
+                }
+            }
+        };
+
+        info!("Downloading model file: {}", target_filename);
+
+        // Download the model file
+        let model_path = match repo_api.get(&target_filename).await {
+            Ok(path) => path,
+            Err(e) => {
+                return Err(ModelError::LoadingFailed(format!(
+                    "Failed to download model file '{}' from repository '{}': {}.\n📁 Verify file path is correct, file exists and is readable. For HuggingFace: check repo name and filename\n💡 Check model file exists, is valid GGUF format, and sufficient memory is available",
+                    target_filename, repo, e
+                )));
+            }
+        };
+
+        info!("Model downloaded to: {}", model_path.display());
+
+        // Load the downloaded model
+        let model_params = LlamaModelParams::default();
+        let model = LlamaModel::load_from_file(&self.backend, &model_path, &model_params)
+            .map_err(|e| {
+                ModelError::LoadingFailed(format!(
+                    "Failed to load downloaded model from {}: {}",
+                    model_path.display(),
+                    e
+                ))
+            })?;
+
+        Ok(model)
+    }
+
+    async fn auto_detect_hf_model_file(&self, repo_api: &hf_hub::api::tokio::ApiRepo) -> Result<String, ModelError> {
+        // List files in the repository
+        match repo_api.info().await {
+            Ok(repo_info) => {
+                let mut gguf_files = Vec::new();
+                let mut bf16_files = Vec::new();
+
+                // Look for GGUF files in the repository
+                for sibling in repo_info.siblings {
+                    if sibling.rfilename.ends_with(".gguf") {
+                        let filename = sibling.rfilename.to_lowercase();
+                        if filename.contains("bf16") {
+                            bf16_files.push(sibling.rfilename);
+                        } else {
+                            gguf_files.push(sibling.rfilename);
+                        }
+                    }
+                }
+
+                // Prioritize BF16 files
+                if !bf16_files.is_empty() {
+                    info!("Found BF16 model file: {}", bf16_files[0]);
+                    return Ok(bf16_files[0].clone());
+                }
+
+                // Fallback to first GGUF file
+                if !gguf_files.is_empty() {
+                    info!("Found GGUF model file: {}", gguf_files[0]);
+                    return Ok(gguf_files[0].clone());
+                }
+
+                Err(ModelError::NotFound(format!(
+                    "No .gguf model files found in HuggingFace repository"
+                )))
+            }
+            Err(e) => Err(ModelError::LoadingFailed(format!(
+                "Failed to get repository info: {}",
+                e
+            ))),
+        }
     }
 
     async fn load_local_model(
