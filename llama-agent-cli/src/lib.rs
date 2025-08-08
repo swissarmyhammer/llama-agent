@@ -319,11 +319,9 @@ pub async fn run_agent(args: Args) -> Result<String> {
         tool_name: None,
         timestamp: std::time::SystemTime::now(),
     };
-    session.messages.push(message);
-    session.updated_at = std::time::SystemTime::now();
 
-    // Update session
-    agent.update_session(session.clone()).await?;
+    // Add message to session (this also updates the session timestamp)
+    agent.add_message(&session.id, message).await?;
 
     // Create generation request
     let request = GenerationRequest {

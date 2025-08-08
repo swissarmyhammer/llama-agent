@@ -239,9 +239,6 @@ pub trait AgentAPI {
     /// Get existing session
     async fn get_session(&self, session_id: &str) -> Result<Option<Session>, AgentError>;
     
-    /// Update session with new messages
-    async fn update_session(&self, session: Session) -> Result<(), AgentError>;
-    
     /// Discover available tools from MCP servers and update session
     async fn discover_tools(&self, session: &mut Session) -> Result<(), AgentError>;
     
