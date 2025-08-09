@@ -2,9 +2,11 @@
 //!
 //! This module contains all validators related to GenerationRequest validation.
 
+mod message_validator;
 mod parameter_validator;
 mod session_validator;
 
+pub use message_validator::{MessageContentConfig, MessageContentValidator};
 pub use parameter_validator::{ParameterConfig, ParameterValidator};
 pub use session_validator::SessionStateValidator;
 
