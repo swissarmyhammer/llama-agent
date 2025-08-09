@@ -10,7 +10,7 @@ pub mod repetition;
 // Re-export stopper implementations
 pub use eos::EosStopper;
 pub use max_tokens::MaxTokensStopper;
-pub use repetition::{RepetitionConfig, RepetitionStopper};
+pub use repetition::RepetitionStopper;
 
 /// Trait for determining when to stop generation
 pub trait Stopper {
