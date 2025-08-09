@@ -3,12 +3,11 @@ use llama_agent::{
     types::{FinishReason, RepetitionConfig},
 };
 use llama_cpp_2::{
-    context::{params::LlamaContextParams, LlamaContext},
+    context::params::LlamaContextParams,
     llama_batch::LlamaBatch,
     llama_backend::LlamaBackend,
     model::{params::LlamaModelParams, LlamaModel},
     sampling::LlamaSampler,
-    token::data_array::LlamaTokenDataArray,
 };
 use std::{
     sync::{Arc, Mutex},
@@ -22,7 +21,6 @@ use tracing::{debug, info, warn};
 struct TestSetup {
     _backend: LlamaBackend,
     model: LlamaModel,
-    context: Box<LlamaContext>,
     _temp_dir: TempDir,
 }
 
@@ -34,8 +32,15 @@ impl TestSetup {
 
         info!("Initializing test setup with unsloth/Qwen3-0.6B-GGUF model");
 
-        // Initialize llama backend
-        let backend = LlamaBackend::init()?;
+        // Initialize llama backend (handle case where it's already initialized)
+        let backend = match LlamaBackend::init() {
+            Ok(backend) => backend,
+            Err(_) => {
+                // Backend already initialized, skip model tests for now
+                warn!("LlamaBackend already initialized, skipping model-dependent tests");
+                return Err("Backend already initialized - integration tests require fresh process".into());
+            }
+        };
 
         // Create temporary directory for model cache
         let temp_dir = TempDir::new()?;
@@ -77,21 +82,11 @@ impl TestSetup {
 
         info!("Model loaded successfully. Vocab size: {}", model.n_vocab());
 
-        // Create context with reasonable parameters for testing
-        let context_params = LlamaContextParams::default()
-            .with_n_ctx(Some(std::num::NonZero::<u32>::new(2048).unwrap()))  // Sufficient context for tests
-            .with_n_batch(512)       // Reasonable batch size
-            .with_n_threads(std::cmp::min(4, num_cpus::get() as i32))  // Use available cores but cap at 4
-            .with_n_threads_batch(std::cmp::min(2, num_cpus::get() as i32));
-
-        let context = Box::new(model.new_context(&backend, context_params)?);
-
-        info!("Context initialized successfully");
+        info!("Model loaded successfully");
 
         Ok(Self {
             _backend: backend,
             model,
-            context,
             _temp_dir: temp_dir,
         })
     }
@@ -100,12 +95,18 @@ impl TestSetup {
     fn generate_tokens(&mut self, prompt: &str, max_tokens: usize) -> Result<(Vec<llama_cpp_2::token::LlamaToken>, String), Box<dyn std::error::Error>> {
         debug!("Generating tokens for prompt: '{}'", prompt);
         
+        // Create context for this generation
+        let context_params = LlamaContextParams::default()
+            .with_n_ctx(Some(std::num::NonZero::<u32>::new(2048).unwrap()))  // Sufficient context for tests
+            .with_n_batch(512)       // Reasonable batch size
+            .with_n_threads(std::cmp::min(4, num_cpus::get() as i32))  // Use available cores but cap at 4
+            .with_n_threads_batch(std::cmp::min(2, num_cpus::get() as i32));
+
+        let mut context = self.model.new_context(&self._backend, context_params)?;
+        
         // Tokenize prompt
         let tokens = self.model.str_to_token(prompt, llama_cpp_2::model::AddBos::Always)?;
         debug!("Prompt tokenized to {} tokens", tokens.len());
-
-        // Clear context state
-        self.context.clear();
 
         // Create batch and decode prompt
         let mut batch = LlamaBatch::new(512, 1);
@@ -113,7 +114,7 @@ impl TestSetup {
             batch.add(token, i as i32, &[0], i == tokens.len() - 1)?;
         }
 
-        self.context.decode(&mut batch)?;
+        context.decode(&mut batch)?;
 
         // Generate tokens
         let mut generated_tokens = Vec::new();
@@ -124,7 +125,7 @@ impl TestSetup {
 
         for _ in 0..max_tokens {
             // For simple testing, just sample from the logits directly
-            let token = sampler.sample(&self.context, batch.n_tokens() - 1);
+            let token = sampler.sample(&context, batch.n_tokens() - 1);
             generated_tokens.push(token);
 
             // Convert token to text
@@ -140,11 +141,22 @@ impl TestSetup {
             // Add token to batch for next iteration
             batch.clear();
             batch.add(token, (tokens.len() + generated_tokens.len() - 1) as i32, &[0], true)?;
-            self.context.decode(&mut batch)?;
+            context.decode(&mut batch)?;
         }
 
         debug!("Generated {} tokens: '{}'", generated_tokens.len(), generated_text);
         Ok((generated_tokens, generated_text))
+    }
+
+    /// Create a context for testing
+    fn create_context(&self) -> Result<llama_cpp_2::context::LlamaContext, Box<dyn std::error::Error>> {
+        let context_params = LlamaContextParams::default()
+            .with_n_ctx(Some(std::num::NonZero::<u32>::new(2048).unwrap()))
+            .with_n_batch(512)
+            .with_n_threads(std::cmp::min(4, num_cpus::get() as i32))
+            .with_n_threads_batch(std::cmp::min(2, num_cpus::get() as i32));
+
+        Ok(self.model.new_context(&self._backend, context_params)?)
     }
 
     /// Get EOS token ID for this model
@@ -216,7 +228,8 @@ async fn test_eos_stopper_integration() -> Result<(), Box<dyn std::error::Error>
 
     // The EosStopper is designed to work with queue.rs integration
     // For direct testing, we verify it doesn't interfere with normal operation
-    let stop_result = eos_stopper.should_stop(&setup.context, &batch);
+    let context = setup.create_context()?;
+    let stop_result = eos_stopper.should_stop(&context, &batch);
     
     // EosStopper returns None in direct calls - EOS detection happens in queue.rs
     assert!(stop_result.is_none(), "EosStopper should return None in direct calls");
@@ -264,7 +277,8 @@ async fn test_max_tokens_stopper_integration() -> Result<(), Box<dyn std::error:
             tokens_processed += chunk.len();
             
             // Check if stopper should stop
-            if let Some(reason) = max_tokens_stopper.should_stop(&setup.context, &batch) {
+            let context = setup.create_context()?;
+            if let Some(reason) = max_tokens_stopper.should_stop(&context, &batch) {
                 stop_result = Some(reason);
                 break;
             }
@@ -291,7 +305,7 @@ async fn test_max_tokens_stopper_integration() -> Result<(), Box<dyn std::error:
 
 #[tokio::test]
 async fn test_repetition_stopper_integration() -> Result<(), Box<dyn std::error::Error>> {
-    let mut setup = TestSetup::new().await?;
+    let setup = TestSetup::new().await?;
     
     info!("Testing RepetitionStopper with real text generation");
 
@@ -316,7 +330,8 @@ async fn test_repetition_stopper_integration() -> Result<(), Box<dyn std::error:
         // Create a dummy batch for testing
         let batch = LlamaBatch::new(512, 1);
         
-        let stop_result = repetition_stopper.should_stop(&setup.context, &batch);
+        let context = setup.create_context()?;
+        let stop_result = repetition_stopper.should_stop(&context, &batch);
         
         if i >= 2 { // Should trigger after 3rd repetition
             if let Some(FinishReason::Stopped(reason)) = stop_result {
@@ -345,7 +360,8 @@ async fn test_repetition_stopper_integration() -> Result<(), Box<dyn std::error:
         non_rep_stopper.add_token_text(token.to_string());
         
         let batch = LlamaBatch::new(512, 1);
-        let stop_result = non_rep_stopper.should_stop(&setup.context, &batch);
+        let context = setup.create_context()?;
+        let stop_result = non_rep_stopper.should_stop(&context, &batch);
         
         assert!(stop_result.is_none(), 
                "RepetitionStopper should not trigger on varied content");
@@ -404,8 +420,9 @@ async fn test_combined_stoppers_integration() -> Result<(), Box<dyn std::error::
         }
 
         // Check all stoppers
+        let context = setup.create_context()?;
         for (i, stopper) in stoppers.iter_mut().enumerate() {
-            if let Some(reason) = stopper.should_stop(&setup.context, &batch) {
+            if let Some(reason) = stopper.should_stop(&context, &batch) {
                 stop_reasons.push((i, reason));
             }
         }
@@ -425,16 +442,14 @@ async fn test_combined_stoppers_integration() -> Result<(), Box<dyn std::error::
         match stopper_idx {
             0 => info!("EOS stopper triggered: {:?}", reason),
             1 => {
-                if let FinishReason::Stopped(ref msg) = reason {
-                    assert!(msg.contains("Maximum tokens reached"));
-                    info!("✓ MaxTokensStopper correctly triggered: {}", msg);
-                }
+                let FinishReason::Stopped(ref msg) = reason;
+                assert!(msg.contains("Maximum tokens reached"));
+                info!("✓ MaxTokensStopper correctly triggered: {}", msg);
             },
             2 => {
-                if let FinishReason::Stopped(ref msg) = reason {
-                    assert!(msg.contains("Repetition detected"));
-                    info!("✓ RepetitionStopper correctly triggered: {}", msg);
-                }
+                let FinishReason::Stopped(ref msg) = reason;
+                assert!(msg.contains("Repetition detected"));
+                info!("✓ RepetitionStopper correctly triggered: {}", msg);
             },
             _ => panic!("Unexpected stopper index: {}", stopper_idx),
         }
@@ -485,8 +500,9 @@ async fn test_stopper_performance_benchmark() -> Result<(), Box<dyn std::error::
             }
 
             // Check all stoppers
+            let context = setup.create_context().unwrap();
             for stopper in &mut stoppers {
-                let _ = stopper.should_stop(&setup.context, &batch);
+                let _ = stopper.should_stop(&context, &batch);
             }
         }
         
@@ -574,8 +590,9 @@ async fn test_concurrent_stopper_usage() -> Result<(), Box<dyn std::error::Error
                         
                         // Check stoppers (this tests thread safety)
                         for stopper in &mut local_stoppers {
-                            let ctx = &setup_clone.lock().unwrap().context;
-                            let _stop_result = stopper.should_stop(ctx, &batch);
+                            let guard = setup_clone.lock().unwrap();
+                            let ctx = guard.create_context().unwrap();
+                            let _stop_result = stopper.should_stop(&ctx, &batch);
                         }
                     }
                     
@@ -608,7 +625,7 @@ async fn test_concurrent_stopper_usage() -> Result<(), Box<dyn std::error::Error
 
 #[tokio::test]
 async fn test_edge_cases_and_error_handling() -> Result<(), Box<dyn std::error::Error>> {
-    let mut setup = TestSetup::new().await?;
+    let setup = TestSetup::new().await?;
     
     info!("Testing edge cases and error handling");
 
@@ -616,22 +633,24 @@ async fn test_edge_cases_and_error_handling() -> Result<(), Box<dyn std::error::
     let empty_batch = LlamaBatch::new(512, 1);
     let mut max_tokens_stopper = MaxTokensStopper::new(10);
     
-    let result = max_tokens_stopper.should_stop(&setup.context, &empty_batch);
+    let context = setup.create_context()?;
+    let result = max_tokens_stopper.should_stop(&context, &empty_batch);
     assert!(result.is_none(), "Stopper should handle empty batch gracefully");
     
     info!("✓ Empty batch handled correctly");
 
     // Test MaxTokensStopper with zero limit
     let mut zero_limit_stopper = MaxTokensStopper::new(0);
-    let result = zero_limit_stopper.should_stop(&setup.context, &empty_batch);
+    let result = zero_limit_stopper.should_stop(&context, &empty_batch);
     
     // Should trigger immediately since any tokens >= 0
     assert!(result.is_some(), "Zero limit stopper should trigger immediately");
     
-    if let Some(FinishReason::Stopped(reason)) = result {
-        assert!(reason.contains("Maximum tokens reached"));
-        info!("✓ Zero limit stopper works correctly: {}", reason);
-    }
+    let Some(FinishReason::Stopped(reason)) = result else {
+        panic!("Expected Stopped reason for zero limit");
+    };
+    assert!(reason.contains("Maximum tokens reached"));
+    info!("✓ Zero limit stopper works correctly: {}", reason);
 
     // Test RepetitionStopper with extreme configuration
     let extreme_config = RepetitionConfig {
@@ -644,7 +663,7 @@ async fn test_edge_cases_and_error_handling() -> Result<(), Box<dyn std::error::
     let mut extreme_stopper = RepetitionStopper::new(extreme_config);
     extreme_stopper.add_token_text("test".to_string());
     
-    let result = extreme_stopper.should_stop(&setup.context, &empty_batch);
+    let result = extreme_stopper.should_stop(&context, &empty_batch);
     assert!(result.is_none(), "Invalid configuration should not cause crashes");
     
     info!("✓ Invalid RepetitionStopper configuration handled gracefully");
@@ -664,7 +683,7 @@ async fn test_edge_cases_and_error_handling() -> Result<(), Box<dyn std::error::
         memory_stopper.add_token_text(format!("token{} ", i));
     }
     
-    let result = memory_stopper.should_stop(&setup.context, &empty_batch);
+    let _result = memory_stopper.should_stop(&context, &empty_batch);
     // Should not crash and memory usage should be bounded
     
     info!("✓ RepetitionStopper memory bounds enforced correctly");
