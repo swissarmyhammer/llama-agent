@@ -263,3 +263,24 @@ mod integration_tests {
 - Focus on clear, descriptive error messages
 - Should be stateless and thread-safe
 - Extracted logic should match or improve upon current session validation in agent.rs
+
+## Proposed Solution
+
+I will implement the `SessionStateValidator` following the specification exactly as detailed in the validation.md. The implementation will:
+
+1. **Create `src/validation/generation_request/session_validator.rs`** containing:
+   - `SessionStateValidator` struct implementing `Validator<GenerationRequest>`
+   - Validation logic for session state including:
+     - Session has at least one message
+     - Timestamps are logically consistent (created_at <= updated_at)
+     - Session ID is not empty or whitespace
+   - Comprehensive unit tests covering all validation scenarios
+   - Integration test demonstrating real-world usage
+
+2. **Update `src/validation/generation_request/mod.rs`** to:
+   - Export the `SessionStateValidator` 
+   - Add integration tests for the validator
+
+This establishes the pattern for all subsequent validators and extracts session validation logic from the existing `agent.rs` while following the established trait-based architecture already implemented in the validation module.
+
+The implementation follows TDD principles and includes all error cases specified in the issue requirements.
