@@ -1,6 +1,6 @@
 use crate::chat_template::ChatTemplateEngine;
 use crate::model::ModelManager;
-use crate::stopper::{EosStopper, MaxTokensStopper, RepetitionStopper, Stopper};
+use crate::stopper::{EosStopper, MaxTokensStopper, RepetitionConfig, RepetitionStopper, Stopper};
 use crate::types::{
     FinishReason, GenerationRequest, GenerationResponse, MessageRole, QueueConfig, QueueError,
     Session, StreamChunk,
@@ -559,14 +559,12 @@ impl RequestQueue {
                     .stopping_config
                     .as_ref()
                     .and_then(|c| c.repetition_detection.clone())
-                    .map(
-                        |types_config| crate::stopper::repetition::RepetitionConfig {
-                            min_pattern_length: types_config.min_pattern_length,
-                            max_pattern_length: types_config.max_pattern_length,
-                            min_repetitions: types_config.min_repetitions,
-                            window_size: types_config.window_size,
-                        },
-                    )
+                    .map(|types_config| RepetitionConfig {
+                        min_pattern_length: types_config.min_pattern_length,
+                        max_pattern_length: types_config.max_pattern_length,
+                        min_repetitions: types_config.min_repetitions,
+                        window_size: types_config.window_size,
+                    })
                     .unwrap_or_default(),
             )),
         ];
@@ -619,6 +617,16 @@ impl RequestQueue {
             }
             generated_text.push_str(&token_str);
             tokens_generated += 1;
+
+            // Feed token text to RepetitionStopper specifically
+            for stopper in &mut stoppers {
+                // Special handling for RepetitionStopper to feed token text
+                if let Some(repetition_stopper) =
+                    stopper.as_any_mut().downcast_mut::<RepetitionStopper>()
+                {
+                    repetition_stopper.add_token_text(token_str.clone());
+                }
+            }
 
             // Check stoppers for early termination
             for stopper in &mut stoppers {
@@ -840,14 +848,12 @@ impl RequestQueue {
                     .stopping_config
                     .as_ref()
                     .and_then(|c| c.repetition_detection.clone())
-                    .map(
-                        |types_config| crate::stopper::repetition::RepetitionConfig {
-                            min_pattern_length: types_config.min_pattern_length,
-                            max_pattern_length: types_config.max_pattern_length,
-                            min_repetitions: types_config.min_repetitions,
-                            window_size: types_config.window_size,
-                        },
-                    )
+                    .map(|types_config| RepetitionConfig {
+                        min_pattern_length: types_config.min_pattern_length,
+                        max_pattern_length: types_config.max_pattern_length,
+                        min_repetitions: types_config.min_repetitions,
+                        window_size: types_config.window_size,
+                    })
                     .unwrap_or_default(),
             )),
         ];
@@ -921,6 +927,16 @@ impl RequestQueue {
             if stream_sender.try_send(Ok(chunk)).is_err() {
                 warn!("Stream receiver disconnected, stopping generation");
                 return Ok(());
+            }
+
+            // Feed token text to RepetitionStopper specifically
+            for stopper in &mut stoppers {
+                // Special handling for RepetitionStopper to feed token text
+                if let Some(repetition_stopper) =
+                    stopper.as_any_mut().downcast_mut::<RepetitionStopper>()
+                {
+                    repetition_stopper.add_token_text(token_text.clone());
+                }
             }
 
             // Check stoppers for early termination

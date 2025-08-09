@@ -24,4 +24,7 @@ pub trait Stopper {
     /// * `Some(FinishReason)` if generation should stop
     /// * `None` if generation should continue
     fn should_stop(&mut self, context: &LlamaContext, batch: &LlamaBatch) -> Option<FinishReason>;
+
+    /// Downcast to Any for specialized handling
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
