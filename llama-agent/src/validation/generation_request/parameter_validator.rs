@@ -189,6 +189,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: vec!["Human:".to_string()],
+            stopping_config: None,
         }
     }
 

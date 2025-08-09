@@ -379,7 +379,7 @@ async fn test_timeout_scenarios() {
                 temperature: Some(0.7),
                 top_p: Some(0.9),
                 stop_tokens: vec![],
-        stopping_config: None,
+                stopping_config: None,
             };
 
             let result = timeout(

@@ -1173,6 +1173,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: Vec::new(),
+            stopping_config: None,
         };
 
         let result = queue.submit_request(request, &session).await;
@@ -1192,6 +1193,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: Vec::new(),
+            stopping_config: None,
         };
 
         let result = queue.submit_request(request, &session).await;
@@ -1218,6 +1220,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: Vec::new(),
+            stopping_config: None,
         };
 
         let mut receiver = queue
@@ -1258,6 +1261,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: Vec::new(),
+            stopping_config: None,
         };
 
         let result = queue.submit_request(request, &session).await;
@@ -1287,6 +1291,7 @@ mod tests {
                 temperature: Some(0.7),
                 top_p: Some(0.9),
                 stop_tokens: Vec::new(),
+                stopping_config: None,
             },
             session,
             response_sender: sender,

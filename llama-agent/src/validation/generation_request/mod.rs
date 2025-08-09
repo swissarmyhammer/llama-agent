@@ -47,6 +47,7 @@ mod integration_tests {
             temperature: Some(0.8),
             top_p: None,
             stop_tokens: vec!["Human:".to_string()],
+            stopping_config: None,
         };
 
         // Validation should pass
@@ -96,6 +97,7 @@ mod integration_tests {
             temperature: Some(0.8),
             top_p: Some(0.95),
             stop_tokens: vec!["User:".to_string(), "Human:".to_string()],
+            stopping_config: None,
         };
 
         // This should pass all validation stages
@@ -125,6 +127,7 @@ mod integration_tests {
             temperature: Some(0.8),
             top_p: Some(0.95),
             stop_tokens: vec!["User:".to_string()],
+            stopping_config: None,
         };
 
         let result = validator.validate(&session, &request);
@@ -179,6 +182,7 @@ mod integration_tests {
             temperature: Some(0.8),
             top_p: Some(0.5),
             stop_tokens: vec!["stop".to_string()],
+            stopping_config: None,
         };
 
         let result = validator.validate(&session, &request);

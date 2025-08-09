@@ -144,6 +144,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: vec!["Human:".to_string()],
+            stopping_config: None,
         }
     }
 
@@ -344,6 +345,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: vec!["Human:".to_string(), "\n\n".to_string()],
+            stopping_config: None,
         };
 
         assert!(validator.validate(&session, &request).is_ok());
