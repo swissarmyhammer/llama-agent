@@ -1,5 +1,6 @@
 use crate::chat_template::ChatTemplateEngine;
 use crate::model::ModelManager;
+use crate::stopper::{EosStopper, MaxTokensStopper, RepetitionStopper, Stopper};
 use crate::types::{
     FinishReason, GenerationRequest, GenerationResponse, MessageRole, QueueConfig, QueueError,
     Session, StreamChunk,
@@ -547,6 +548,29 @@ impl RequestQueue {
 
         debug!("Initial prompt processed, starting generation");
 
+        // Create fresh stoppers for this request
+        let mut stoppers: Vec<Box<dyn Stopper>> = vec![
+            Box::new(EosStopper::new(0)), // EOS token ID - placeholder, actual EOS detection handled separately
+            Box::new(MaxTokensStopper::new(
+                request.max_tokens.unwrap_or(4096) as usize
+            )),
+            Box::new(RepetitionStopper::new(
+                request
+                    .stopping_config
+                    .as_ref()
+                    .and_then(|c| c.repetition_detection.clone())
+                    .map(
+                        |types_config| crate::stopper::repetition::RepetitionConfig {
+                            min_pattern_length: types_config.min_pattern_length,
+                            max_pattern_length: types_config.max_pattern_length,
+                            min_repetitions: types_config.min_repetitions,
+                            window_size: types_config.window_size,
+                        },
+                    )
+                    .unwrap_or_default(),
+            )),
+        ];
+
         // Create sampler for token generation
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::dist(1234), // Use fixed seed for deterministic behavior
@@ -595,6 +619,20 @@ impl RequestQueue {
             }
             generated_text.push_str(&token_str);
             tokens_generated += 1;
+
+            // Check stoppers for early termination
+            for stopper in &mut stoppers {
+                if let Some(FinishReason::Stopped(reason)) = stopper.should_stop(&ctx, &batch) {
+                    finish_reason = FinishReason::Stopped(reason);
+                    break;
+                }
+            }
+
+            // If a stopper triggered, break out of the generation loop
+            if !matches!(finish_reason, FinishReason::Stopped(ref r) if r == "Maximum tokens reached")
+            {
+                break;
+            }
 
             // Check for stop tokens in the generated text
             if Self::should_stop(&generated_text, &request.stop_tokens) {
@@ -791,6 +829,29 @@ impl RequestQueue {
 
         debug!("Initial prompt processed for streaming, starting generation");
 
+        // Create fresh stoppers for this request
+        let mut stoppers: Vec<Box<dyn Stopper>> = vec![
+            Box::new(EosStopper::new(0)), // EOS token ID - placeholder, actual EOS detection handled separately
+            Box::new(MaxTokensStopper::new(
+                request.max_tokens.unwrap_or(4096) as usize
+            )),
+            Box::new(RepetitionStopper::new(
+                request
+                    .stopping_config
+                    .as_ref()
+                    .and_then(|c| c.repetition_detection.clone())
+                    .map(
+                        |types_config| crate::stopper::repetition::RepetitionConfig {
+                            min_pattern_length: types_config.min_pattern_length,
+                            max_pattern_length: types_config.max_pattern_length,
+                            min_repetitions: types_config.min_repetitions,
+                            window_size: types_config.window_size,
+                        },
+                    )
+                    .unwrap_or_default(),
+            )),
+        ];
+
         // Create sampler for token generation
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::dist(1234), // Use fixed seed for deterministic behavior
@@ -860,6 +921,22 @@ impl RequestQueue {
             if stream_sender.try_send(Ok(chunk)).is_err() {
                 warn!("Stream receiver disconnected, stopping generation");
                 return Ok(());
+            }
+
+            // Check stoppers for early termination
+            for stopper in &mut stoppers {
+                if let Some(FinishReason::Stopped(reason)) = stopper.should_stop(&ctx, &batch) {
+                    return Self::handle_streaming_completion(
+                        worker_id,
+                        request_id,
+                        &generated_text,
+                        tokens_generated,
+                        start_time,
+                        &stream_sender,
+                        chat_template,
+                        &reason,
+                    );
+                }
             }
 
             // Check for stop tokens in the accumulated generated text
