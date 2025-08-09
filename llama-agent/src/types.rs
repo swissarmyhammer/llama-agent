@@ -190,6 +190,57 @@ impl Default for StoppingConfig {
     }
 }
 
+impl StoppingConfig {
+    /// Validate the stopping configuration for reasonable limits
+    pub fn validate(&self) -> Result<(), String> {
+        // Validate max_tokens
+        if let Some(max_tokens) = self.max_tokens {
+            if max_tokens == 0 {
+                return Err("max_tokens must be greater than 0".to_string());
+            }
+            if max_tokens > 100_000 {
+                return Err("max_tokens cannot exceed 100,000 for safety".to_string());
+            }
+        }
+
+        // Validate repetition_detection config
+        if let Some(ref repetition_config) = self.repetition_detection {
+            if repetition_config.min_pattern_length == 0 {
+                return Err("min_pattern_length must be greater than 0".to_string());
+            }
+            if repetition_config.max_pattern_length < repetition_config.min_pattern_length {
+                return Err("max_pattern_length must be >= min_pattern_length".to_string());
+            }
+            if repetition_config.min_repetitions < 2 {
+                return Err("min_repetitions must be at least 2".to_string());
+            }
+            if repetition_config.window_size == 0 {
+                return Err("window_size must be greater than 0".to_string());
+            }
+            if repetition_config.window_size > 100_000 {
+                return Err("window_size cannot exceed 100,000 for memory safety".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Create a validated StoppingConfig
+    pub fn new_validated(
+        max_tokens: Option<usize>,
+        repetition_detection: Option<RepetitionConfig>,
+        eos_detection: bool,
+    ) -> Result<Self, String> {
+        let config = Self {
+            max_tokens,
+            repetition_detection,
+            eos_detection,
+        };
+        config.validate()?;
+        Ok(config)
+    }
+}
+
 // Re-export RepetitionConfig from stopper module to avoid duplication
 pub use crate::stopper::repetition::RepetitionConfig;
 
@@ -201,6 +252,102 @@ pub struct GenerationRequest {
     pub top_p: Option<f32>,
     pub stop_tokens: Vec<String>,
     pub stopping_config: Option<StoppingConfig>,
+}
+
+impl GenerationRequest {
+    /// Create a new GenerationRequest with default stopping configuration
+    pub fn new(session_id: SessionId) -> Self {
+        Self {
+            session_id,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_tokens: Vec::new(),
+            stopping_config: None,
+        }
+    }
+
+    /// Create a GenerationRequest with default stopping config if none is provided
+    pub fn with_default_stopping(mut self) -> Self {
+        if self.stopping_config.is_none() {
+            self.stopping_config = Some(StoppingConfig::default());
+        }
+        self
+    }
+
+    /// Create a GenerationRequest with custom stopping configuration
+    pub fn with_stopping_config(mut self, config: StoppingConfig) -> Self {
+        self.stopping_config = Some(config);
+        self
+    }
+
+    /// Create a GenerationRequest with validated stopping configuration
+    pub fn with_validated_stopping_config(mut self, config: StoppingConfig) -> Result<Self, String> {
+        config.validate()?;
+        self.stopping_config = Some(config);
+        Ok(self)
+    }
+
+    /// Set max_tokens using builder pattern
+    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
+
+    /// Set temperature using builder pattern
+    pub fn with_temperature(mut self, temperature: f32) -> Self {
+        self.temperature = Some(temperature);
+        self
+    }
+
+    /// Set top_p using builder pattern
+    pub fn with_top_p(mut self, top_p: f32) -> Self {
+        self.top_p = Some(top_p);
+        self
+    }
+
+    /// Set stop_tokens using builder pattern
+    pub fn with_stop_tokens(mut self, stop_tokens: Vec<String>) -> Self {
+        self.stop_tokens = stop_tokens;
+        self
+    }
+
+    /// Get the effective max_tokens considering both the direct field and stopping_config
+    pub fn effective_max_tokens(&self) -> Option<u32> {
+        // Priority: direct max_tokens field, then stopping_config max_tokens, then None
+        self.max_tokens.or_else(|| {
+            self.stopping_config
+                .as_ref()
+                .and_then(|config| config.max_tokens.map(|val| val as u32))
+        })
+    }
+
+    /// Migrate max_tokens to stopping_config for consistency
+    pub fn migrate_max_tokens_to_stopping_config(mut self) -> Self {
+        if let Some(max_tokens) = self.max_tokens {
+            let max_tokens_usize = max_tokens as usize;
+            
+            match &mut self.stopping_config {
+                Some(config) => {
+                    // If stopping_config exists but no max_tokens is set, use the direct field
+                    if config.max_tokens.is_none() {
+                        config.max_tokens = Some(max_tokens_usize);
+                    }
+                    // Clear the direct field since we've moved it to stopping_config
+                    self.max_tokens = None;
+                }
+                None => {
+                    // Create new stopping config with the max_tokens
+                    self.stopping_config = Some(StoppingConfig {
+                        max_tokens: Some(max_tokens_usize),
+                        ..StoppingConfig::default()
+                    });
+                    self.max_tokens = None;
+                }
+            }
+        }
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -1405,5 +1552,199 @@ mod tests {
             }
             _ => panic!("Wrong variant after deserialization"),
         }
+    }
+
+    #[test]
+    fn test_stopping_config_validation() {
+        // Valid config should pass
+        let config = StoppingConfig {
+            max_tokens: Some(100),
+            repetition_detection: Some(RepetitionConfig::default()),
+            eos_detection: true,
+        };
+        assert!(config.validate().is_ok());
+
+        // Zero max_tokens should fail
+        let config = StoppingConfig {
+            max_tokens: Some(0),
+            repetition_detection: None,
+            eos_detection: true,
+        };
+        assert!(config.validate().is_err());
+
+        // Extremely high max_tokens should fail
+        let config = StoppingConfig {
+            max_tokens: Some(200_000),
+            repetition_detection: None,
+            eos_detection: true,
+        };
+        assert!(config.validate().is_err());
+
+        // Invalid repetition config should fail
+        let config = StoppingConfig {
+            max_tokens: Some(100),
+            repetition_detection: Some(RepetitionConfig {
+                min_pattern_length: 0,
+                max_pattern_length: 10,
+                min_repetitions: 3,
+                window_size: 1000,
+            }),
+            eos_detection: true,
+        };
+        assert!(config.validate().is_err());
+
+        // max_pattern_length < min_pattern_length should fail
+        let config = StoppingConfig {
+            max_tokens: Some(100),
+            repetition_detection: Some(RepetitionConfig {
+                min_pattern_length: 20,
+                max_pattern_length: 10,
+                min_repetitions: 3,
+                window_size: 1000,
+            }),
+            eos_detection: true,
+        };
+        assert!(config.validate().is_err());
+
+        // min_repetitions < 2 should fail
+        let config = StoppingConfig {
+            max_tokens: Some(100),
+            repetition_detection: Some(RepetitionConfig {
+                min_pattern_length: 10,
+                max_pattern_length: 100,
+                min_repetitions: 1,
+                window_size: 1000,
+            }),
+            eos_detection: true,
+        };
+        assert!(config.validate().is_err());
+
+        // Zero window_size should fail
+        let config = StoppingConfig {
+            max_tokens: Some(100),
+            repetition_detection: Some(RepetitionConfig {
+                min_pattern_length: 10,
+                max_pattern_length: 100,
+                min_repetitions: 3,
+                window_size: 0,
+            }),
+            eos_detection: true,
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_stopping_config_new_validated() {
+        // Valid config should create successfully
+        let config = StoppingConfig::new_validated(
+            Some(100),
+            Some(RepetitionConfig::default()),
+            true,
+        );
+        assert!(config.is_ok());
+
+        // Invalid config should fail creation
+        let config = StoppingConfig::new_validated(
+            Some(0), // Invalid max_tokens
+            None,
+            true,
+        );
+        assert!(config.is_err());
+    }
+
+    #[test]
+    fn test_generation_request_builder_methods() {
+        let session_id = SessionId::new();
+        
+        // Test basic builder pattern
+        let request = GenerationRequest::new(session_id.clone())
+            .with_max_tokens(100)
+            .with_temperature(0.7)
+            .with_top_p(0.9)
+            .with_stop_tokens(vec!["</s>".to_string()])
+            .with_default_stopping();
+
+        assert_eq!(request.max_tokens, Some(100));
+        assert_eq!(request.temperature, Some(0.7));
+        assert_eq!(request.top_p, Some(0.9));
+        assert_eq!(request.stop_tokens, vec!["</s>".to_string()]);
+        assert!(request.stopping_config.is_some());
+
+        // Test validated stopping config (should succeed with valid config)
+        let stopping_config = StoppingConfig::default();
+        let request = GenerationRequest::new(session_id.clone())
+            .with_validated_stopping_config(stopping_config);
+        assert!(request.is_ok());
+
+        // Test validated stopping config (should fail with invalid config)  
+        let invalid_config = StoppingConfig {
+            max_tokens: Some(0), // Invalid
+            repetition_detection: None,
+            eos_detection: true,
+        };
+        let request = GenerationRequest::new(session_id)
+            .with_validated_stopping_config(invalid_config);
+        assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_generation_request_effective_max_tokens() {
+        let session_id = SessionId::new();
+
+        // Direct max_tokens should take priority
+        let request = GenerationRequest::new(session_id.clone())
+            .with_max_tokens(200)
+            .with_stopping_config(StoppingConfig {
+                max_tokens: Some(100),
+                repetition_detection: None,
+                eos_detection: true,
+            });
+        assert_eq!(request.effective_max_tokens(), Some(200));
+
+        // Stopping config max_tokens should be used if no direct field
+        let request = GenerationRequest::new(session_id.clone())
+            .with_stopping_config(StoppingConfig {
+                max_tokens: Some(150),
+                repetition_detection: None,
+                eos_detection: true,
+            });
+        assert_eq!(request.effective_max_tokens(), Some(150));
+
+        // No max_tokens anywhere should return None
+        let request = GenerationRequest::new(session_id);
+        assert_eq!(request.effective_max_tokens(), None);
+    }
+
+    #[test]
+    fn test_generation_request_migrate_max_tokens() {
+        let session_id = SessionId::new();
+
+        // Test migration from direct max_tokens to stopping_config
+        let request = GenerationRequest::new(session_id.clone())
+            .with_max_tokens(300)
+            .migrate_max_tokens_to_stopping_config();
+
+        assert_eq!(request.max_tokens, None);
+        assert!(request.stopping_config.is_some());
+        let stopping_config = request.stopping_config.unwrap();
+        assert_eq!(stopping_config.max_tokens, Some(300));
+        assert!(stopping_config.eos_detection);
+
+        // Test migration when stopping_config already exists
+        let existing_config = StoppingConfig {
+            max_tokens: None,
+            repetition_detection: Some(RepetitionConfig::default()),
+            eos_detection: false,
+        };
+        let request = GenerationRequest::new(session_id)
+            .with_max_tokens(400)
+            .with_stopping_config(existing_config)
+            .migrate_max_tokens_to_stopping_config();
+
+        assert_eq!(request.max_tokens, None);
+        let stopping_config = request.stopping_config.unwrap();
+        assert_eq!(stopping_config.max_tokens, Some(400));
+        assert!(stopping_config.repetition_detection.is_some());
+        assert!(!stopping_config.eos_detection);
     }
 }

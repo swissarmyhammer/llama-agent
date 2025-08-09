@@ -376,14 +376,11 @@ pub async fn run_agent(args: Args) -> Result<String> {
     agent.add_message(&session.id, message).await?;
 
     // Create generation request
-    let request = GenerationRequest {
-        session_id: session.id.clone(),
-        max_tokens: Some(args.limit),
-        temperature: Some(args.temperature),
-        top_p: Some(args.top_p),
-        stop_tokens: vec![],
-        stopping_config: None,
-    };
+    let request = GenerationRequest::new(session.id.clone())
+        .with_max_tokens(args.limit)
+        .with_temperature(args.temperature)
+        .with_top_p(args.top_p)
+        .with_default_stopping();
 
     if debug_mode {
         info!("Generating response (streaming)...");
