@@ -495,3 +495,32 @@ pub use argument_validator::{ToolArgumentValidator, ArgumentValidatorConfig};
 - Focuses on basic security and structure validation
 - Prepares the interface for schema-based validation in the next step
 - Maintains compatibility with existing tool call workflows
+
+## Proposed Solution
+
+Based on analysis of the existing codebase, I'll implement the ToolArgumentValidator as specified, with some adjustments to match the actual type system:
+
+### Key Observations:
+- ToolCall uses `id: ToolCallId` (ULID-based) not String in the actual types
+- Existing validation logic in `agent.rs` (lines 111-137) is basic and can be enhanced
+- The validation system uses trait-based architecture with session context
+
+### Implementation Plan:
+1. **Extract and enhance existing validation logic** from `validate_tool_arguments` method
+2. **Create configurable ToolArgumentValidator** with security limits and validation options
+3. **Implement Validator<ToolCall> trait** following the existing pattern
+4. **Add comprehensive validation** including:
+   - Tool ID and name validation (using ToolCallId instead of String)
+   - Tool availability checking against session context
+   - JSON argument structure validation with security limits
+   - Size and depth protection against DoS attacks
+5. **Comprehensive test coverage** for all validation scenarios
+6. **Proper integration** with existing validation module structure
+
+### Architecture Decisions:
+- Use ULID-based ToolCallId as per existing types system
+- Maintain session context for tool availability validation  
+- Configurable limits to prevent security issues
+- Comprehensive error reporting for debugging
+
+This implementation will prepare the foundation for schema-based validation in the next step while providing immediate security and structure validation improvements.
