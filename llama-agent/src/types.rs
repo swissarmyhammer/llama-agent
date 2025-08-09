@@ -173,6 +173,42 @@ pub struct ToolDefinition {
     pub server_name: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct StoppingConfig {
+    pub max_tokens: Option<usize>,
+    pub repetition_detection: Option<RepetitionConfig>,
+    pub eos_detection: bool,
+}
+
+impl Default for StoppingConfig {
+    fn default() -> Self {
+        Self {
+            max_tokens: None,
+            repetition_detection: None,
+            eos_detection: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RepetitionConfig {
+    pub min_pattern_length: usize,
+    pub max_pattern_length: usize,
+    pub min_repetitions: usize,
+    pub window_size: usize,
+}
+
+impl Default for RepetitionConfig {
+    fn default() -> Self {
+        Self {
+            min_pattern_length: 10,
+            max_pattern_length: 100,
+            min_repetitions: 3,
+            window_size: 1000,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct GenerationRequest {
     pub session_id: SessionId,
@@ -180,6 +216,7 @@ pub struct GenerationRequest {
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub stop_tokens: Vec<String>,
+    pub stopping_config: Option<StoppingConfig>,
 }
 
 #[derive(Debug)]

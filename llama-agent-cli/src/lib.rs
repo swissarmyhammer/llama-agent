@@ -335,6 +335,7 @@ pub async fn run_agent(args: Args) -> Result<String> {
         temperature: Some(args.temperature),
         top_p: Some(args.top_p),
         stop_tokens: vec![],
+        stopping_config: None,
     };
 
     if debug_mode {

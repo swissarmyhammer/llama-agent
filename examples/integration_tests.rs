@@ -530,6 +530,7 @@ async fn test_streaming_patterns() -> Result<(), Box<dyn std::error::Error>> {
         temperature: Some(0.7),
         top_p: Some(0.9),
         stop_tokens: vec!["</s>".to_string()],
+        stopping_config: None,
     };
 
     if generation_request.max_tokens != Some(100) {
