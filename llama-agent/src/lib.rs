@@ -6,6 +6,7 @@ pub mod model;
 pub mod queue;
 pub mod session;
 pub mod types;
+pub mod validation;
 
 // Re-export commonly used types
 pub use types::*;
@@ -15,3 +16,6 @@ pub use agent::AgentServer;
 
 // Re-export MCP functionality
 pub use mcp::{HealthStatus as MCPHealthStatus, MCPClient, MCPServer, RetryConfig};
+
+// Re-export validation functionality
+pub use validation::{ValidationError, Validator};
