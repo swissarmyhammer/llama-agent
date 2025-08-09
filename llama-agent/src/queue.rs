@@ -1,6 +1,6 @@
 use crate::chat_template::ChatTemplateEngine;
 use crate::model::ModelManager;
-use crate::stopper::{EosStopper, MaxTokensStopper, RepetitionConfig, RepetitionStopper, Stopper};
+use crate::stopper::{EosStopper, MaxTokensStopper, RepetitionStopper, Stopper};
 use crate::types::{
     FinishReason, GenerationRequest, GenerationResponse, MessageRole, QueueConfig, QueueError,
     Session, StreamChunk,
@@ -550,7 +550,7 @@ impl RequestQueue {
 
         // Create fresh stoppers for this request
         let mut stoppers: Vec<Box<dyn Stopper>> = vec![
-            Box::new(EosStopper::new(0)), // EOS token ID - placeholder, actual EOS detection handled separately
+            Box::new(EosStopper::new(2)), // Common EOS token ID, actual detection via model.is_eog_token()
             Box::new(MaxTokensStopper::new(
                 request.max_tokens.unwrap_or(4096) as usize
             )),
@@ -559,12 +559,6 @@ impl RequestQueue {
                     .stopping_config
                     .as_ref()
                     .and_then(|c| c.repetition_detection.clone())
-                    .map(|types_config| RepetitionConfig {
-                        min_pattern_length: types_config.min_pattern_length,
-                        max_pattern_length: types_config.max_pattern_length,
-                        min_repetitions: types_config.min_repetitions,
-                        window_size: types_config.window_size,
-                    })
                     .unwrap_or_default(),
             )),
         ];
@@ -839,7 +833,7 @@ impl RequestQueue {
 
         // Create fresh stoppers for this request
         let mut stoppers: Vec<Box<dyn Stopper>> = vec![
-            Box::new(EosStopper::new(0)), // EOS token ID - placeholder, actual EOS detection handled separately
+            Box::new(EosStopper::new(2)), // Common EOS token ID, actual detection via model.is_eog_token()
             Box::new(MaxTokensStopper::new(
                 request.max_tokens.unwrap_or(4096) as usize
             )),
@@ -848,12 +842,6 @@ impl RequestQueue {
                     .stopping_config
                     .as_ref()
                     .and_then(|c| c.repetition_detection.clone())
-                    .map(|types_config| RepetitionConfig {
-                        min_pattern_length: types_config.min_pattern_length,
-                        max_pattern_length: types_config.max_pattern_length,
-                        min_repetitions: types_config.min_repetitions,
-                        window_size: types_config.window_size,
-                    })
                     .unwrap_or_default(),
             )),
         ];

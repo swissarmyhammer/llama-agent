@@ -190,24 +190,8 @@ impl Default for StoppingConfig {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct RepetitionConfig {
-    pub min_pattern_length: usize,
-    pub max_pattern_length: usize,
-    pub min_repetitions: usize,
-    pub window_size: usize,
-}
-
-impl Default for RepetitionConfig {
-    fn default() -> Self {
-        Self {
-            min_pattern_length: 10,
-            max_pattern_length: 100,
-            min_repetitions: 3,
-            window_size: 1000,
-        }
-    }
-}
+// Re-export RepetitionConfig from stopper module to avoid duplication
+pub use crate::stopper::repetition::RepetitionConfig;
 
 #[derive(Debug)]
 pub struct GenerationRequest {
