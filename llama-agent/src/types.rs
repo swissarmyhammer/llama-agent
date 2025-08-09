@@ -190,13 +190,9 @@ pub struct GenerationResponse {
     pub finish_reason: FinishReason,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FinishReason {
-    MaxTokens,
-    StopToken,
-    EndOfSequence,
-    ToolCall,
-    Error(String),
+    Stopped(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -942,17 +938,17 @@ mod tests {
     #[test]
     fn test_finish_reason() {
         let reasons = [
-            FinishReason::MaxTokens,
-            FinishReason::StopToken,
-            FinishReason::EndOfSequence,
-            FinishReason::ToolCall,
-            FinishReason::Error("test error".to_string()),
+            FinishReason::Stopped("Maximum tokens reached".to_string()),
+            FinishReason::Stopped("Stop token detected".to_string()),
+            FinishReason::Stopped("End of sequence token detected".to_string()),
+            FinishReason::Stopped("Tool call detected".to_string()),
+            FinishReason::Stopped("Error: test error".to_string()),
         ];
 
         assert_eq!(reasons.len(), 5);
 
         match &reasons[4] {
-            FinishReason::Error(msg) => assert_eq!(msg, "test error"),
+            FinishReason::Stopped(msg) => assert_eq!(msg, "Error: test error"),
             _ => panic!("Wrong variant"),
         }
     }

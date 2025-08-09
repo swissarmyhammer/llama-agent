@@ -251,11 +251,12 @@ async fn demonstrate_generation_errors() -> Result<(), Box<dyn std::error::Error
             match agent.generate(request).await {
                 Ok(response) => {
                     println!("✓ Generation completed");
-                    match response.finish_reason {
-                        FinishReason::Error(ref error) => {
+                    match &response.finish_reason {
+                        FinishReason::Stopped(reason) if reason.starts_with("Error: ") => {
+                            let error = &reason[7..]; // Remove "Error: " prefix
                             println!("  ⚠ Generation finished with error: {}", error);
                         }
-                        FinishReason::MaxTokens => {
+                        FinishReason::Stopped(reason) if reason == "Maximum tokens reached" => {
                             println!("  ℹ Generation stopped due to token limit");
                         }
                         _ => {

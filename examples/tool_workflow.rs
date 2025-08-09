@@ -95,8 +95,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let response = agent.generate(request).await?;
 
     // Handle the response based on finish reason
-    match response.finish_reason {
-        FinishReason::ToolCall => {
+    match &response.finish_reason {
+        FinishReason::Stopped(reason) if reason == "Tool call detected" => {
             println!("Model wants to call tools!");
             println!(
                 "Generated text with tool calls:\n{}",

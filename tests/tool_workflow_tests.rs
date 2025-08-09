@@ -266,17 +266,17 @@ fn test_workflow_limits() {
 #[test]
 fn test_finish_reason_tool_call() {
     let finish_reasons = vec![
-        FinishReason::ToolCall,
-        FinishReason::MaxTokens,
-        FinishReason::StopToken,
-        FinishReason::EndOfSequence,
-        FinishReason::Error("test error".to_string()),
+        FinishReason::Stopped("Tool call detected".to_string()),
+        FinishReason::Stopped("Maximum tokens reached".to_string()),
+        FinishReason::Stopped("Stop token detected".to_string()),
+        FinishReason::Stopped("End of sequence token detected".to_string()),
+        FinishReason::Stopped("Error: test error".to_string()),
     ];
 
     // Test that ToolCall is correctly identified
     for reason in finish_reasons {
-        match reason {
-            FinishReason::ToolCall => {
+        match &reason {
+            FinishReason::Stopped(msg) if msg == "Tool call detected" => {
                 // This should trigger tool processing - verified by reaching this branch
             }
             _ => {

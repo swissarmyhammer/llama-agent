@@ -14,7 +14,11 @@ impl EosStopper {
 }
 
 impl Stopper for EosStopper {
-    fn should_stop(&mut self, _context: &LlamaContext, _batch: &LlamaBatch) -> Option<FinishReason> {
+    fn should_stop(
+        &mut self,
+        _context: &LlamaContext,
+        _batch: &LlamaBatch,
+    ) -> Option<FinishReason> {
         // TODO: Implementation will be added in STOPPING_000004
         None
     }

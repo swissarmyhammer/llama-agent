@@ -22,4 +22,6 @@ pub use mcp::{HealthStatus as MCPHealthStatus, MCPClient, MCPServer, RetryConfig
 pub use validation::{ValidationError, Validator};
 
 // Re-export stopper functionality
-pub use stopper::{FinishReason, Stopper, EosStopper, MaxTokensStopper, RepetitionStopper, RepetitionConfig};
+pub use stopper::{
+    EosStopper, FinishReason, MaxTokensStopper, RepetitionConfig, RepetitionStopper, Stopper,
+};

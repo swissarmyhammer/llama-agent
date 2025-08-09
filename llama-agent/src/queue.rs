@@ -555,7 +555,7 @@ impl RequestQueue {
 
         let max_tokens = request.max_tokens.unwrap_or(512);
         let mut generated_text = String::new();
-        let mut finish_reason = FinishReason::MaxTokens;
+        let mut finish_reason = FinishReason::Stopped("Maximum tokens reached".to_string());
         let mut tokens_generated = 0u32;
         let mut n_cur = tokens_list.len();
 
@@ -567,7 +567,7 @@ impl RequestQueue {
                     "Worker {} batch request {} cancelled during token generation",
                     worker_id, request_id
                 );
-                finish_reason = FinishReason::Error("Request cancelled".to_string());
+                finish_reason = FinishReason::Stopped("Error: Request cancelled".to_string());
                 break;
             }
 
@@ -576,7 +576,7 @@ impl RequestQueue {
 
             // Check for end of sequence token
             if model.is_eog_token(token) {
-                finish_reason = FinishReason::EndOfSequence;
+                finish_reason = FinishReason::Stopped("End of sequence token detected".to_string());
                 break;
             }
 
@@ -598,7 +598,7 @@ impl RequestQueue {
 
             // Check for stop tokens in the generated text
             if Self::should_stop(&generated_text, &request.stop_tokens) {
-                finish_reason = FinishReason::StopToken;
+                finish_reason = FinishReason::Stopped("Stop token detected".to_string());
                 break;
             }
 
@@ -619,37 +619,39 @@ impl RequestQueue {
         }
 
         // Check if the generated text contains tool calls
-        let final_finish_reason = if finish_reason == FinishReason::EndOfSequence
-            || finish_reason == FinishReason::StopToken
-            || finish_reason == FinishReason::MaxTokens
-        {
-            match chat_template.extract_tool_calls(&generated_text) {
-                Ok(tool_calls) if !tool_calls.is_empty() => {
-                    debug!(
-                        "Worker {} detected {} tool calls in generated text for request {}",
-                        worker_id,
-                        tool_calls.len(),
-                        request_id
-                    );
-                    FinishReason::ToolCall
-                }
-                Ok(_) => {
-                    debug!(
-                        "Worker {} no tool calls detected in generated text for request {}",
-                        worker_id, request_id
-                    );
-                    finish_reason
-                }
-                Err(e) => {
-                    warn!(
-                        "Worker {} failed to extract tool calls for request {}: {}",
-                        worker_id, request_id, e
-                    );
-                    finish_reason
+        let final_finish_reason = match &finish_reason {
+            FinishReason::Stopped(reason)
+                if reason == "End of sequence token detected"
+                    || reason == "Stop token detected"
+                    || reason == "Maximum tokens reached" =>
+            {
+                match chat_template.extract_tool_calls(&generated_text) {
+                    Ok(tool_calls) if !tool_calls.is_empty() => {
+                        debug!(
+                            "Worker {} detected {} tool calls in generated text for request {}",
+                            worker_id,
+                            tool_calls.len(),
+                            request_id
+                        );
+                        FinishReason::Stopped("Tool call detected".to_string())
+                    }
+                    Ok(_) => {
+                        debug!(
+                            "Worker {} no tool calls detected in generated text for request {}",
+                            worker_id, request_id
+                        );
+                        finish_reason
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Worker {} failed to extract tool calls for request {}: {}",
+                            worker_id, request_id, e
+                        );
+                        finish_reason
+                    }
                 }
             }
-        } else {
-            finish_reason
+            _ => finish_reason,
         };
 
         let generation_time = start_time.elapsed();
