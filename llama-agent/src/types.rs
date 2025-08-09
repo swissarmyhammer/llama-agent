@@ -282,7 +282,10 @@ impl GenerationRequest {
     }
 
     /// Create a GenerationRequest with validated stopping configuration
-    pub fn with_validated_stopping_config(mut self, config: StoppingConfig) -> Result<Self, String> {
+    pub fn with_validated_stopping_config(
+        mut self,
+        config: StoppingConfig,
+    ) -> Result<Self, String> {
         config.validate()?;
         self.stopping_config = Some(config);
         Ok(self)
@@ -326,7 +329,7 @@ impl GenerationRequest {
     pub fn migrate_max_tokens_to_stopping_config(mut self) -> Self {
         if let Some(max_tokens) = self.max_tokens {
             let max_tokens_usize = max_tokens as usize;
-            
+
             match &mut self.stopping_config {
                 Some(config) => {
                     // If stopping_config exists but no max_tokens is set, use the direct field
@@ -1636,11 +1639,8 @@ mod tests {
     #[test]
     fn test_stopping_config_new_validated() {
         // Valid config should create successfully
-        let config = StoppingConfig::new_validated(
-            Some(100),
-            Some(RepetitionConfig::default()),
-            true,
-        );
+        let config =
+            StoppingConfig::new_validated(Some(100), Some(RepetitionConfig::default()), true);
         assert!(config.is_ok());
 
         // Invalid config should fail creation
@@ -1655,7 +1655,7 @@ mod tests {
     #[test]
     fn test_generation_request_builder_methods() {
         let session_id = SessionId::new();
-        
+
         // Test basic builder pattern
         let request = GenerationRequest::new(session_id.clone())
             .with_max_tokens(100)
@@ -1676,14 +1676,14 @@ mod tests {
             .with_validated_stopping_config(stopping_config);
         assert!(request.is_ok());
 
-        // Test validated stopping config (should fail with invalid config)  
+        // Test validated stopping config (should fail with invalid config)
         let invalid_config = StoppingConfig {
             max_tokens: Some(0), // Invalid
             repetition_detection: None,
             eos_detection: true,
         };
-        let request = GenerationRequest::new(session_id)
-            .with_validated_stopping_config(invalid_config);
+        let request =
+            GenerationRequest::new(session_id).with_validated_stopping_config(invalid_config);
         assert!(request.is_err());
     }
 
@@ -1702,8 +1702,8 @@ mod tests {
         assert_eq!(request.effective_max_tokens(), Some(200));
 
         // Stopping config max_tokens should be used if no direct field
-        let request = GenerationRequest::new(session_id.clone())
-            .with_stopping_config(StoppingConfig {
+        let request =
+            GenerationRequest::new(session_id.clone()).with_stopping_config(StoppingConfig {
                 max_tokens: Some(150),
                 repetition_detection: None,
                 eos_detection: true,

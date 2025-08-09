@@ -13,7 +13,7 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, QueueConfig, RepetitionConfig, RetryConfig, 
+        MessageRole, ModelConfig, ModelSource, QueueConfig, RepetitionConfig, RetryConfig,
         SessionConfig, StoppingConfig,
     },
     AgentServer,
