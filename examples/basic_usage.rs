@@ -13,7 +13,8 @@
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
-        MessageRole, ModelConfig, ModelSource, QueueConfig, RetryConfig, SessionConfig,
+        MessageRole, ModelConfig, ModelSource, QueueConfig, RepetitionConfig, RetryConfig, 
+        SessionConfig, StoppingConfig,
     },
     AgentServer,
 };
@@ -92,14 +93,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Generate response
-    let request = GenerationRequest {
-        session_id: session.id.clone(),
+    // Create generation request with explicit stopping configuration
+    let stopping_config = StoppingConfig {
         max_tokens: Some(100),
-        temperature: Some(0.7),
-        top_p: Some(0.9),
-        stop_tokens: vec![],
-        stopping_config: None,
+        repetition_detection: Some(RepetitionConfig::default()),
+        eos_detection: true,
     };
+
+    let request = GenerationRequest::new(session.id.clone())
+        .with_temperature(0.7)
+        .with_top_p(0.9)
+        .with_stopping_config(stopping_config);
 
     info!("Generating response...");
     let response = agent.generate(request).await?;

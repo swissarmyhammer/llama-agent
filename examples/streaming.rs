@@ -7,7 +7,7 @@ use futures::StreamExt;
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, GenerationRequest, Message, MessageRole, ModelConfig, ModelSource,
-        QueueConfig, RetryConfig, SessionConfig,
+        QueueConfig, RepetitionConfig, RetryConfig, SessionConfig, StoppingConfig,
     },
     AgentServer,
 };
@@ -60,14 +60,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Create generation request for streaming
-    let request = GenerationRequest {
-        session_id: session.id.clone(),
-        max_tokens: Some(500),
-        temperature: Some(0.7),
-        top_p: Some(0.9),
-        stop_tokens: vec![],
-        stopping_config: None,
-    };
+    // Use builder pattern with stopping configuration for streaming
+    let request = GenerationRequest::new(session.id.clone())
+        .with_max_tokens(500)
+        .with_temperature(0.7)
+        .with_top_p(0.9)
+        .with_stopping_config(StoppingConfig {
+            max_tokens: Some(500),
+            repetition_detection: Some(RepetitionConfig::default()),
+            eos_detection: true,
+        });
 
     println!("\nStarting streaming generation...");
     println!("Response (streaming):");
@@ -135,14 +137,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         timestamp: SystemTime::now(),
     });
 
-    let batch_request = GenerationRequest {
-        session_id: batch_session.id.clone(),
-        max_tokens: Some(500),
-        temperature: Some(0.7),
-        top_p: Some(0.9),
-        stop_tokens: vec![],
-        stopping_config: None,
-    };
+    // Compare with batch generation using explicit config
+    let batch_request = GenerationRequest::new(batch_session.id.clone())
+        .with_max_tokens(500)
+        .with_temperature(0.7)
+        .with_top_p(0.9)
+        .with_default_stopping();
 
     let batch_start = std::time::Instant::now();
     let batch_response = agent.generate(batch_request).await?;
