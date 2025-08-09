@@ -2,8 +2,10 @@
 //!
 //! This module contains all validators related to GenerationRequest validation.
 
+mod parameter_validator;
 mod session_validator;
 
+pub use parameter_validator::{ParameterConfig, ParameterValidator};
 pub use session_validator::SessionStateValidator;
 
 #[cfg(test)]
