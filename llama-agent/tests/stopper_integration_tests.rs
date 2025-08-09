@@ -22,7 +22,7 @@ use tracing::{debug, info, warn};
 struct TestSetup {
     _backend: LlamaBackend,
     model: LlamaModel,
-    context: LlamaContext,
+    context: Box<LlamaContext>,
     _temp_dir: TempDir,
 }
 
@@ -79,12 +79,12 @@ impl TestSetup {
 
         // Create context with reasonable parameters for testing
         let context_params = LlamaContextParams::default()
-            .with_n_ctx(Some(2048))  // Sufficient context for tests
+            .with_n_ctx(Some(std::num::NonZero::<u32>::new(2048).unwrap()))  // Sufficient context for tests
             .with_n_batch(512)       // Reasonable batch size
-            .with_n_threads(std::cmp::min(4, num_cpus::get() as u32))  // Use available cores but cap at 4
-            .with_n_threads_batch(std::cmp::min(2, num_cpus::get() as u32));
+            .with_n_threads(std::cmp::min(4, num_cpus::get() as i32))  // Use available cores but cap at 4
+            .with_n_threads_batch(std::cmp::min(2, num_cpus::get() as i32));
 
-        let context = model.new_context(&backend, context_params)?;
+        let context = Box::new(model.new_context(&backend, context_params)?);
 
         info!("Context initialized successfully");
 
@@ -96,12 +96,12 @@ impl TestSetup {
         })
     }
 
-    /// Generate text with the model and return tokens/text
-    fn generate_tokens(&mut self, prompt: &str, max_tokens: usize) -> Result<(Vec<u32>, String), Box<dyn std::error::Error>> {
+    /// Generate text with the model and return tokens/text  
+    fn generate_tokens(&mut self, prompt: &str, max_tokens: usize) -> Result<(Vec<llama_cpp_2::token::LlamaToken>, String), Box<dyn std::error::Error>> {
         debug!("Generating tokens for prompt: '{}'", prompt);
         
         // Tokenize prompt
-        let tokens = self.model.str_to_token(prompt, true)?;
+        let tokens = self.model.str_to_token(prompt, llama_cpp_2::model::AddBos::Always)?;
         debug!("Prompt tokenized to {} tokens", tokens.len());
 
         // Clear context state
@@ -110,7 +110,7 @@ impl TestSetup {
         // Create batch and decode prompt
         let mut batch = LlamaBatch::new(512, 1);
         for (i, &token) in tokens.iter().enumerate() {
-            batch.add(token, i, &[0], i == tokens.len() - 1)?;
+            batch.add(token, i as i32, &[0], i == tokens.len() - 1)?;
         }
 
         self.context.decode(&mut batch)?;
@@ -120,22 +120,15 @@ impl TestSetup {
         let mut generated_text = String::new();
 
         // Simple sampler for reproducible results
-        let mut sampler = LlamaSampler::new();
+        let mut sampler = LlamaSampler::temp(0.8);
 
         for _ in 0..max_tokens {
-            let candidates = self.context.get_logits_ith(batch.n_tokens() - 1);
-            let candidates_p = LlamaTokenDataArray::from_iter(
-                candidates.iter().enumerate().map(|(i, &logit)| {
-                    llama_cpp_2::token::data::LlamaTokenData::new(i as u32, logit, 0.0)
-                }),
-                false,
-            );
-
-            let token = sampler.sample(&self.context, candidates_p);
+            // For simple testing, just sample from the logits directly
+            let token = sampler.sample(&self.context, batch.n_tokens() - 1);
             generated_tokens.push(token);
 
             // Convert token to text
-            let token_str = self.model.token_to_str(token, true)?;
+            let token_str = self.model.token_to_str(token, llama_cpp_2::model::Special::Tokenize)?;
             generated_text.push_str(&token_str);
 
             // Check for EOS
@@ -146,7 +139,7 @@ impl TestSetup {
 
             // Add token to batch for next iteration
             batch.clear();
-            batch.add(token, tokens.len() + generated_tokens.len() - 1, &[0], true)?;
+            batch.add(token, (tokens.len() + generated_tokens.len() - 1) as i32, &[0], true)?;
             self.context.decode(&mut batch)?;
         }
 
@@ -159,7 +152,8 @@ impl TestSetup {
         // Try to get the actual EOS token ID from the model
         // Most models use specific EOS tokens
         for token_id in 0..std::cmp::min(1000, self.model.n_vocab() as u32) {
-            if self.model.is_eog_token(token_id) {
+            let llama_token = llama_cpp_2::token::LlamaToken(token_id as i32);
+            if self.model.is_eog_token(llama_token) {
                 return token_id;
             }
         }
@@ -217,7 +211,7 @@ async fn test_eos_stopper_integration() -> Result<(), Box<dyn std::error::Error>
     // Create a batch with the generated tokens to test stopper
     let mut batch = LlamaBatch::new(512, 1);
     for (i, &token) in tokens.iter().enumerate() {
-        batch.add(token, i, &[0], i == tokens.len() - 1)?;
+        batch.add(token, i as i32, &[0], i == tokens.len() - 1)?;
     }
 
     // The EosStopper is designed to work with queue.rs integration
@@ -264,7 +258,7 @@ async fn test_max_tokens_stopper_integration() -> Result<(), Box<dyn std::error:
         for chunk in tokens.chunks(2) {
             let mut batch = LlamaBatch::new(512, 1);
             for (i, &token) in chunk.iter().enumerate() {
-                batch.add(token, tokens_processed + i, &[0], i == chunk.len() - 1)?;
+                batch.add(token, (tokens_processed + i) as i32, &[0], i == chunk.len() - 1)?;
             }
             
             tokens_processed += chunk.len();
@@ -394,14 +388,14 @@ async fn test_combined_stoppers_integration() -> Result<(), Box<dyn std::error::
     for chunk in tokens.chunks(3) {
         let mut batch = LlamaBatch::new(512, 1);
         for (i, &token) in chunk.iter().enumerate() {
-            batch.add(token, tokens_processed + i, &[0], i == chunk.len() - 1)?;
+            batch.add(token, (tokens_processed + i) as i32, &[0], i == chunk.len() - 1)?;
         }
 
         tokens_processed += chunk.len();
 
         // Update RepetitionStopper with token text
         for &token in chunk {
-            let token_text = setup.model.token_to_str(token, true)?;
+            let token_text = setup.model.token_to_str(token, llama_cpp_2::model::Special::Tokenize)?;
             for stopper in &mut stoppers {
                 if let Some(rep_stopper) = stopper.as_any_mut().downcast_mut::<RepetitionStopper>() {
                     rep_stopper.add_token_text(token_text.clone());
@@ -487,7 +481,7 @@ async fn test_stopper_performance_benchmark() -> Result<(), Box<dyn std::error::
         for chunk in tokens.chunks(5) {
             let mut batch = LlamaBatch::new(512, 1);
             for (i, &token) in chunk.iter().enumerate() {
-                batch.add(token, i, &[0], i == chunk.len() - 1).unwrap();
+                batch.add(token, i as i32, &[0], i == chunk.len() - 1).unwrap();
             }
 
             // Check all stoppers
@@ -571,7 +565,7 @@ async fn test_concurrent_stopper_usage() -> Result<(), Box<dyn std::error::Error
                     for chunk in tokens.chunks(3) {
                         let mut batch = LlamaBatch::new(512, 1);
                         for (i, &token) in chunk.iter().enumerate() {
-                            if let Err(e) = batch.add(token, tokens_processed + i, &[0], i == chunk.len() - 1) {
+                            if let Err(e) = batch.add(token, (tokens_processed + i) as i32, &[0], i == chunk.len() - 1) {
                                 return Err(format!("Task {} batch add failed: {}", task_id, e));
                             }
                         }
@@ -682,18 +676,9 @@ async fn test_edge_cases_and_error_handling() -> Result<(), Box<dyn std::error::
 /// Note: Individual test functions are run separately by cargo test
 /// This function exists for documentation and can be used for custom test runners
 #[allow(dead_code)]
-async fn run_comprehensive_stopper_integration_tests() -> Result<(), Box<dyn std::error::Error>> {
-    info!("=== Starting Comprehensive Stopper Integration Tests ===");
-    
-    // Run all test functions
-    test_eos_stopper_integration().await?;
-    test_max_tokens_stopper_integration().await?;
-    test_repetition_stopper_integration().await?;
-    test_combined_stoppers_integration().await?;
-    test_stopper_performance_benchmark().await?;
-    test_concurrent_stopper_usage().await?;
-    test_edge_cases_and_error_handling().await?;
-    
-    info!("=== All Integration Tests Passed Successfully ===");
+fn run_comprehensive_stopper_integration_tests() -> Result<(), Box<dyn std::error::Error>> {
+    // Note: This function should not be used as actual tests are async and run by tokio::test
+    // Individual async tests are run separately by cargo test framework
+    info!("=== Integration tests are run individually by cargo test ===");
     Ok(())
 }
