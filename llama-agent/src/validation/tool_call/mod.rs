@@ -2,4 +2,6 @@
 //!
 //! This module contains all validators related to ToolCall validation.
 
-// Placeholder - will be implemented in subsequent steps
+mod argument_validator;
+
+pub use argument_validator::{ArgumentValidatorConfig, ToolArgumentValidator};
