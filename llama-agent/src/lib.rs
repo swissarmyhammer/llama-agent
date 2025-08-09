@@ -5,6 +5,7 @@ pub mod mcp;
 pub mod model;
 pub mod queue;
 pub mod session;
+pub mod stopper;
 pub mod types;
 pub mod validation;
 
@@ -19,3 +20,6 @@ pub use mcp::{HealthStatus as MCPHealthStatus, MCPClient, MCPServer, RetryConfig
 
 // Re-export validation functionality
 pub use validation::{ValidationError, Validator};
+
+// Re-export stopper functionality
+pub use stopper::{FinishReason, Stopper, EosStopper, MaxTokensStopper, RepetitionStopper, RepetitionConfig};
