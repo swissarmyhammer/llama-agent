@@ -68,6 +68,11 @@ mockall = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 ulid = { workspace = true }
+llama-cpp-2 = { workspace = true }
+hf-hub = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+num_cpus = { workspace = true }
 
 # Performance optimized release profile
 [profile.release]
