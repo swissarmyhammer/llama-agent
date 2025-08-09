@@ -1,1 +1,0 @@
-the cli is missing help on switches, seems like we are using clap wrong to support --help and running the bare command with no switches

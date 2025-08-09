@@ -19,6 +19,9 @@ const SEPARATOR_WIDTH: usize = 60;
 #[command(about = "A CLI for testing the llama-agent library")]
 #[command(version)]
 #[command(
+    help_template = "{before-help}{name} {version}\n{author-with-newline}{about-with-newline}\n{usage-heading} {usage}\n\n{all-args}{after-help}"
+)]
+#[command(
     long_about = "A command-line interface for testing the llama-agent library.
 
 Examples:
@@ -35,58 +38,102 @@ Examples:
   llama-agent-cli --model ./models/llama2-7b --filename llama-2-7b.q4_k_m.gguf --prompt \"Write a haiku\" --temperature 0.8 --top-p 0.95"
 )]
 pub struct Args {
-    /// Model source: HuggingFace repo name (e.g. 'microsoft/DialoGPT-medium') or local folder path
-    #[arg(long)]
+    /// Model source: HuggingFace repo (org/model) or local folder path
+    #[arg(
+        long,
+        help = "Model source: HuggingFace repo (org/model) or local folder path"
+    )]
     pub model: String,
 
-    /// Optional specific filename to use from the repo or folder
-    /// If not provided, will auto-detect with BF16 preference
-    #[arg(long)]
-    pub filename: Option<String>,
-
-    /// Prompt text to kick off generation
-    #[arg(long)]
+    /// Prompt text to generate from
+    #[arg(long, help = "Prompt text to generate from")]
     pub prompt: String,
 
-    /// Stop generation after this many tokens even without proper stop token
-    #[arg(long, default_value = "512")]
+    /// Optional filename to use from repo or folder
+    #[arg(
+        long,
+        help = "Optional filename to use from repo or folder",
+        long_help = "Optional specific filename to use from the repo or folder. If not provided, will auto-detect with BF16 preference"
+    )]
+    pub filename: Option<String>,
+
+    /// Max tokens to generate (default: 512)
+    #[arg(long, default_value = "512", help = "Max tokens to generate")]
     pub limit: u32,
 
+    /// Temperature for generation (0.0-2.0, default: 0.7)
+    #[arg(
+        long,
+        default_value = "0.7",
+        help = "Temperature for generation (0.0-2.0)"
+    )]
+    pub temperature: f32,
+
+    /// Top-p for nucleus sampling (0.0-1.0, default: 0.9)
+    #[arg(
+        long,
+        default_value = "0.9",
+        help = "Top-p for nucleus sampling (0.0-1.0)"
+    )]
+    pub top_p: f32,
+
+    /// Enable debug logging
+    #[arg(long, default_value = "false", help = "Enable debug logging")]
+    pub debug: bool,
+
     /// Model batch size for processing
-    #[arg(long, default_value = "512")]
+    #[arg(
+        long,
+        default_value = "512",
+        help = "Model batch size",
+        long_help = "Model batch size for processing"
+    )]
     pub batch_size: u32,
 
     /// Maximum queue size for pending requests
-    #[arg(long, default_value = "10")]
+    #[arg(
+        long,
+        default_value = "10",
+        help = "Max queue size",
+        long_help = "Maximum queue size for pending requests"
+    )]
     pub max_queue_size: usize,
 
     /// Request timeout in seconds
-    #[arg(long, default_value = "120")]
+    #[arg(
+        long,
+        default_value = "120",
+        help = "Request timeout (seconds)",
+        long_help = "Request timeout in seconds"
+    )]
     pub request_timeout: u64,
 
     /// Number of worker threads
-    #[arg(long, default_value = "1")]
+    #[arg(
+        long,
+        default_value = "1",
+        help = "Worker threads",
+        long_help = "Number of worker threads"
+    )]
     pub worker_threads: usize,
 
     /// Maximum number of concurrent sessions
-    #[arg(long, default_value = "10")]
+    #[arg(
+        long,
+        default_value = "10",
+        help = "Max sessions",
+        long_help = "Maximum number of concurrent sessions"
+    )]
     pub max_sessions: usize,
 
     /// Session timeout in seconds
-    #[arg(long, default_value = "3600")]
+    #[arg(
+        long,
+        default_value = "3600",
+        help = "Session timeout (seconds)",
+        long_help = "Session timeout in seconds"
+    )]
     pub session_timeout: u64,
-
-    /// Temperature for text generation (0.0 to 1.0)
-    #[arg(long, default_value = "0.7")]
-    pub temperature: f32,
-
-    /// Top-p for nucleus sampling (0.0 to 1.0)
-    #[arg(long, default_value = "0.9")]
-    pub top_p: f32,
-
-    /// Enable debug logging (shows verbose llama_cpp model loading output)
-    #[arg(long, default_value = "false")]
-    pub debug: bool,
 }
 
 pub fn validate_args(args: &Args) -> Result<()> {

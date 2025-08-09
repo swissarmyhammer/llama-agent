@@ -1,5 +1,7 @@
 use llama_cpp_2::{context::LlamaContext, llama_batch::LlamaBatch};
 
+use crate::types::FinishReason;
+
 // Stopper implementations
 pub mod eos;
 pub mod max_tokens;
@@ -9,13 +11,6 @@ pub mod repetition;
 pub use eos::EosStopper;
 pub use max_tokens::MaxTokensStopper;
 pub use repetition::{RepetitionConfig, RepetitionStopper};
-
-/// Finish reason for generation termination
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FinishReason {
-    /// Generation was stopped with a descriptive message
-    Stopped(String),
-}
 
 /// Trait for determining when to stop generation
 pub trait Stopper {

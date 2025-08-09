@@ -1,4 +1,5 @@
-use super::{FinishReason, Stopper};
+use super::Stopper;
+use crate::types::FinishReason;
 use llama_cpp_2::{context::LlamaContext, llama_batch::LlamaBatch};
 
 /// Configuration for repetition detection
