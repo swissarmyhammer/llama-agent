@@ -348,7 +348,8 @@ pub async fn run_agent(args: Args) -> Result<String> {
         Ok(mut stream) => {
             let mut token_count = 0;
             let mut full_response = String::new();
-            let mut finish_reason = FinishReason::EndOfSequence; // Default finish reason
+            let mut finish_reason =
+                FinishReason::Stopped("End of sequence token detected".to_string()); // Default finish reason
 
             // Process each chunk as it arrives
             while let Some(chunk_result) = stream.next().await {
@@ -371,7 +372,7 @@ pub async fn run_agent(args: Args) -> Result<String> {
                     }
                     Err(e) => {
                         error!("Streaming error: {}", e);
-                        finish_reason = FinishReason::Error(e.to_string());
+                        finish_reason = FinishReason::Stopped(format!("Error: {}", e));
                         break;
                     }
                 }

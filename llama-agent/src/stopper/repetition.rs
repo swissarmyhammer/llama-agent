@@ -38,7 +38,11 @@ impl RepetitionStopper {
 }
 
 impl Stopper for RepetitionStopper {
-    fn should_stop(&mut self, _context: &LlamaContext, _batch: &LlamaBatch) -> Option<FinishReason> {
+    fn should_stop(
+        &mut self,
+        _context: &LlamaContext,
+        _batch: &LlamaBatch,
+    ) -> Option<FinishReason> {
         // TODO: Implementation will be added in STOPPING_000006
         None
     }

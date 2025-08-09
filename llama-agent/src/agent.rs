@@ -594,57 +594,66 @@ impl AgentAPI for AgentServer {
             );
 
             // Check if response contains tool calls
-            if response.finish_reason == crate::types::FinishReason::ToolCall {
-                debug!("Response contains tool calls, processing...");
+            if let crate::types::FinishReason::Stopped(reason) = &response.finish_reason {
+                if reason == "Tool call detected" {
+                    debug!("Response contains tool calls, processing...");
 
-                // Process tool calls
-                let tool_results = self
-                    .process_tool_calls(&response.generated_text, &working_session)
-                    .await?;
+                    // Process tool calls
+                    let tool_results = self
+                        .process_tool_calls(&response.generated_text, &working_session)
+                        .await?;
 
-                if tool_results.is_empty() {
-                    debug!("No tool results returned, ending tool call workflow");
-                    break;
-                }
+                    if tool_results.is_empty() {
+                        debug!("No tool results returned, ending tool call workflow");
+                        break;
+                    }
 
-                // Add the assistant's response (with tool calls) to the session
-                working_session.messages.push(crate::types::Message {
-                    role: crate::types::MessageRole::Assistant,
-                    content: response.generated_text.clone(),
-                    tool_call_id: None,
-                    tool_name: None,
-                    timestamp: std::time::SystemTime::now(),
-                });
-
-                // Add tool results as Tool messages to the session
-                for tool_result in &tool_results {
-                    let tool_content = if let Some(error) = &tool_result.error {
-                        format!("Error: {}", error)
-                    } else {
-                        serde_json::to_string(&tool_result.result)
-                            .unwrap_or_else(|_| "Invalid tool result".to_string())
-                    };
-
+                    // Add the assistant's response (with tool calls) to the session
                     working_session.messages.push(crate::types::Message {
-                        role: crate::types::MessageRole::Tool,
-                        content: tool_content,
-                        tool_call_id: Some(tool_result.call_id),
+                        role: crate::types::MessageRole::Assistant,
+                        content: response.generated_text.clone(),
+                        tool_call_id: None,
                         tool_name: None,
                         timestamp: std::time::SystemTime::now(),
                     });
+
+                    // Add tool results as Tool messages to the session
+                    for tool_result in &tool_results {
+                        let tool_content = if let Some(error) = &tool_result.error {
+                            format!("Error: {}", error)
+                        } else {
+                            serde_json::to_string(&tool_result.result)
+                                .unwrap_or_else(|_| "Invalid tool result".to_string())
+                        };
+
+                        working_session.messages.push(crate::types::Message {
+                            role: crate::types::MessageRole::Tool,
+                            content: tool_content,
+                            tool_call_id: Some(tool_result.call_id),
+                            tool_name: None,
+                            timestamp: std::time::SystemTime::now(),
+                        });
+                    }
+
+                    working_session.updated_at = std::time::SystemTime::now();
+
+                    debug!(
+                        "Tool call processing completed with {} results, continuing generation",
+                        tool_results.len()
+                    );
+
+                    // Continue the loop to generate response incorporating tool results
+                    continue;
+                } else {
+                    // No more tool calls, we're done
+                    debug!(
+                        "Generation completed without tool calls after {} iterations",
+                        iterations
+                    );
+                    break;
                 }
-
-                working_session.updated_at = std::time::SystemTime::now();
-
-                debug!(
-                    "Tool call processing completed with {} results, continuing generation",
-                    tool_results.len()
-                );
-
-                // Continue the loop to generate response incorporating tool results
-                continue;
             } else {
-                // No more tool calls, we're done
+                // No tool call detected, we're done
                 debug!(
                     "Generation completed without tool calls after {} iterations",
                     iterations
@@ -657,7 +666,9 @@ impl AgentAPI for AgentServer {
             generated_text: accumulated_response,
             tokens_generated: total_tokens,
             generation_time: std::time::Duration::from_millis(0), // This would need proper timing
-            finish_reason: crate::types::FinishReason::EndOfSequence, // Or original finish reason
+            finish_reason: crate::types::FinishReason::Stopped(
+                "End of sequence token detected".to_string(),
+            ), // Or original finish reason
         };
 
         debug!(

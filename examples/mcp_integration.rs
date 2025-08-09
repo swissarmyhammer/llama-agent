@@ -269,8 +269,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(response) => {
             println!("Response: {}", response.generated_text);
 
-            match response.finish_reason {
-                FinishReason::Error(error) => {
+            match &response.finish_reason {
+                FinishReason::Stopped(reason) if reason.starts_with("Error: ") => {
+                    let error = &reason[7..]; // Remove "Error: " prefix
                     println!("✓ Error was handled gracefully: {}", error);
                 }
                 _ => {

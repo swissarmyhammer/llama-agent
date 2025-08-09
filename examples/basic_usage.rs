@@ -104,39 +104,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let response = agent.generate(request).await?;
 
     // Check if the response includes tool calls
-    match response.finish_reason {
-        FinishReason::ToolCall => {
-            info!("Model wants to call tools!");
-            println!("Model wants to call tools!");
+    match &response.finish_reason {
+        FinishReason::Stopped(reason) => {
+            match reason.as_str() {
+                "Tool call detected" => {
+                    info!("Model wants to call tools!");
+                    println!("Model wants to call tools!");
 
-            // Extract tool calls from the generated text
-            // Note: The ChatTemplateEngine is used internally by AgentServer.generate()
-            // The tool call extraction and execution is handled automatically in the generate() method
-            // This example shows the conceptual flow, but the actual implementation is handled internally
+                    // Extract tool calls from the generated text
+                    // Note: The ChatTemplateEngine is used internally by AgentServer.generate()
+                    // The tool call extraction and execution is handled automatically in the generate() method
+                    // This example shows the conceptual flow, but the actual implementation is handled internally
 
-            println!("Generated text with tool calls:");
-            println!("{}", response.generated_text);
+                    println!("Generated text with tool calls:");
+                    println!("{}", response.generated_text);
 
-            // The tool calls have already been processed by the generate() method
-            // and the response includes the final result after tool execution
-        }
-        FinishReason::MaxTokens => {
-            println!("Response (truncated due to token limit):");
-            println!("{}", response.generated_text);
-        }
-        FinishReason::StopToken => {
-            println!("Response:");
-            println!("{}", response.generated_text);
-        }
-        FinishReason::EndOfSequence => {
-            println!("Response:");
-            println!("{}", response.generated_text);
-        }
-        FinishReason::Error(ref err) => {
-            error!("Generation completed with error: {}", err);
-            println!("❌ Generation completed with error: {}", err);
-            println!("Response with partial text:");
-            println!("{}", response.generated_text);
+                    // The tool calls have already been processed by the generate() method
+                    // and the response includes the final result after tool execution
+                }
+                "Maximum tokens reached" => {
+                    println!("Response (truncated due to token limit):");
+                    println!("{}", response.generated_text);
+                }
+                "Stop token detected" => {
+                    println!("Response:");
+                    println!("{}", response.generated_text);
+                }
+                "End of sequence token detected" => {
+                    println!("Response:");
+                    println!("{}", response.generated_text);
+                }
+                reason if reason.starts_with("Error: ") => {
+                    let err = &reason[7..]; // Remove "Error: " prefix
+                    error!("Generation completed with error: {}", err);
+                    println!("❌ Generation completed with error: {}", err);
+                    println!("Response with partial text:");
+                    println!("{}", response.generated_text);
+                }
+                _ => {
+                    println!("Generation stopped: {}", reason);
+                    println!("Response:");
+                    println!("{}", response.generated_text);
+                }
+            }
         }
     }
 
