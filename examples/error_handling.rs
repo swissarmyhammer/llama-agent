@@ -246,6 +246,7 @@ async fn demonstrate_generation_errors() -> Result<(), Box<dyn std::error::Error
                 temperature: Some(2.0),  // Extreme temperature
                 top_p: Some(1.0),
                 stop_tokens: vec![],
+        stopping_config: None,
             };
 
             match agent.generate(request).await {

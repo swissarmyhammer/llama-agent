@@ -458,6 +458,7 @@ async fn benchmark_real_performance(
                 temperature: Some(0.7),
                 top_p: Some(0.9),
                 stop_tokens: vec![],
+        stopping_config: None,
             };
 
             let response = agent.generate(request).await?;

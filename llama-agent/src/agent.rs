@@ -577,6 +577,7 @@ impl AgentAPI for AgentServer {
                 temperature: request.temperature,
                 top_p: request.top_p,
                 stop_tokens: request.stop_tokens.clone(),
+                stopping_config: request.stopping_config.clone(),
             };
 
             // Submit to request queue
@@ -714,6 +715,7 @@ impl AgentAPI for AgentServer {
             temperature: request.temperature,
             top_p: request.top_p,
             stop_tokens: request.stop_tokens,
+            stopping_config: request.stopping_config,
         };
 
         // Submit to request queue for streaming

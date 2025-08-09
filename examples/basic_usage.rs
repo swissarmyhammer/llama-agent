@@ -98,6 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         temperature: Some(0.7),
         top_p: Some(0.9),
         stop_tokens: vec![],
+        stopping_config: None,
     };
 
     info!("Generating response...");

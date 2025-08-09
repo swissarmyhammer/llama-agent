@@ -176,6 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         temperature: Some(0.3),
         top_p: Some(0.9),
         stop_tokens: vec![],
+        stopping_config: None,
     };
 
     match agent.generate(request1).await {
@@ -220,6 +221,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         temperature: Some(0.3),
         top_p: Some(0.9),
         stop_tokens: vec![],
+        stopping_config: None,
     };
 
     match agent.generate(request2).await {
@@ -263,6 +265,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         temperature: Some(0.3),
         top_p: Some(0.9),
         stop_tokens: vec![],
+        stopping_config: None,
     };
 
     match agent.generate(request3).await {
