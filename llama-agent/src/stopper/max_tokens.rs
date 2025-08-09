@@ -1,9 +1,6 @@
 use super::Stopper;
 use crate::types::FinishReason;
-use llama_cpp_2::{
-    context::LlamaContext,
-    llama_batch::LlamaBatch,
-};
+use llama_cpp_2::{context::LlamaContext, llama_batch::LlamaBatch};
 
 /// Tracks total tokens generated and stops when a configured maximum is reached
 pub struct MaxTokensStopper {
@@ -21,7 +18,11 @@ impl MaxTokensStopper {
 }
 
 impl Stopper for MaxTokensStopper {
-    fn should_stop(&mut self, _context: &LlamaContext, _batch: &LlamaBatch) -> Option<FinishReason> {
+    fn should_stop(
+        &mut self,
+        _context: &LlamaContext,
+        _batch: &LlamaBatch,
+    ) -> Option<FinishReason> {
         // Implementation will be added in later issue
         None
     }

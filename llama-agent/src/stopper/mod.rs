@@ -1,7 +1,4 @@
-use llama_cpp_2::{
-    context::LlamaContext,
-    llama_batch::LlamaBatch,
-};
+use llama_cpp_2::{context::LlamaContext, llama_batch::LlamaBatch};
 
 use crate::types::FinishReason;
 
@@ -12,7 +9,7 @@ pub trait Stopper {
 
 // Re-export stopper implementations
 pub mod eos;
-pub mod max_tokens; 
+pub mod max_tokens;
 pub mod repetition;
 
 pub use eos::EosStopper;

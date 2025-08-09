@@ -1,9 +1,6 @@
 use super::Stopper;
 use crate::types::FinishReason;
-use llama_cpp_2::{
-    context::LlamaContext,
-    llama_batch::LlamaBatch,
-};
+use llama_cpp_2::{context::LlamaContext, llama_batch::LlamaBatch};
 
 /// Configuration for repetition detection
 #[derive(Debug, Clone)]
@@ -41,7 +38,11 @@ impl RepetitionStopper {
 }
 
 impl Stopper for RepetitionStopper {
-    fn should_stop(&mut self, _context: &LlamaContext, _batch: &LlamaBatch) -> Option<FinishReason> {
+    fn should_stop(
+        &mut self,
+        _context: &LlamaContext,
+        _batch: &LlamaBatch,
+    ) -> Option<FinishReason> {
         // Implementation will be added in later issue
         None
     }
