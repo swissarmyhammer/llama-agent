@@ -37,10 +37,7 @@ impl Validator<GenerationRequest> for SessionStateValidator {
             ));
         }
 
-        // Validate session ID is not empty
-        if session.id.to_string().trim().is_empty() {
-            return Err(ValidationError::invalid_state("Session ID cannot be empty"));
-        }
+        // Note: SessionId is a ULID wrapper and cannot be empty by construction
 
         Ok(())
     }
@@ -133,6 +130,18 @@ mod tests {
             validator1.validate(&session, &request).is_ok(),
             validator2.validate(&session, &request).is_ok()
         );
+    }
+
+    #[test]
+    fn test_session_id_validation_always_passes() {
+        let validator = SessionStateValidator::new();
+        let session = create_test_session();
+        let request = create_test_request();
+
+        // SessionId is a ULID wrapper and cannot be invalid by construction
+        // This test documents that session ID validation always passes for valid SessionIds
+        let result = validator.validate(&session, &request);
+        assert!(result.is_ok());
     }
 
     #[test]
