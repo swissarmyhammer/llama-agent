@@ -940,6 +940,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: Some(0.9),
             stop_tokens: vec!["</s>".to_string()],
+            stopping_config: None,
         };
 
         assert_eq!(request.max_tokens, Some(100));
