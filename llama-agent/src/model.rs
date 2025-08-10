@@ -1,11 +1,11 @@
 use crate::types::{ModelConfig, ModelError, ModelSource};
-use llama_loader::load_huggingface_model;
 use llama_cpp_2::{
     context::{params::LlamaContextParams, LlamaContext},
     llama_backend::LlamaBackend,
     model::{params::LlamaModelParams, LlamaModel},
     send_logs_to_tracing, LogOptions,
 };
+use llama_loader::load_huggingface_model;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
@@ -200,13 +200,6 @@ impl ModelManager {
         // Delegate to llama-loader
         load_huggingface_model(&self.backend, repo, filename, &self.config.retry_config).await
     }
-
-
-
-
-
-
-
 
     async fn load_local_model(
         &self,

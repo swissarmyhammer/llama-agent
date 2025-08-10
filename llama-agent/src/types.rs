@@ -542,9 +542,6 @@ pub struct AgentConfig {
     pub session_config: SessionConfig,
 }
 
-
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueConfig {
     pub max_queue_size: usize,
@@ -567,7 +564,6 @@ impl Default for SessionConfig {
     }
 }
 
-
 impl Default for QueueConfig {
     fn default() -> Self {
         Self {
@@ -577,8 +573,6 @@ impl Default for QueueConfig {
         }
     }
 }
-
-
 
 impl QueueConfig {
     pub fn validate(&self) -> Result<(), QueueError> {
@@ -717,7 +711,6 @@ pub enum AgentError {
     #[error("Queue overloaded: {capacity} requests queued (max capacity)\n💡 Wait and retry, or increase max_queue_size configuration")]
     QueueFull { capacity: usize },
 }
-
 
 #[derive(Debug, Clone, Error)]
 pub enum QueueError {
