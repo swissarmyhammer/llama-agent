@@ -98,11 +98,37 @@ async fn main() -> Result<()> {
                 info!("Output: {:?}", args.output);
             }
 
-            // Placeholder implementation - will be implemented in later issue
-            eprintln!(
-                "Embed command is not yet implemented. This will be added in EMBEDDING_000013."
-            );
-            std::process::exit(1);
+            // Run embed command implementation
+            match llama_cli::embed::run_embed_command(args).await {
+                Ok(_) => {
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    // Check error type for appropriate exit codes
+                    let error_msg = e.to_string();
+                    if error_msg.contains("does not exist")
+                        || error_msg.contains("Invalid")
+                        || error_msg.contains("cannot be empty")
+                        || error_msg.contains("Batch size")
+                        || error_msg.contains("Max length")
+                    {
+                        // Validation error - exit code 2
+                        eprintln!("Error: {}", e);
+                        std::process::exit(2);
+                    } else if error_msg.contains("Failed to load model")
+                        || error_msg.contains("Failed to initialize")
+                        || error_msg.contains("Model")
+                    {
+                        // Model loading error - exit code 3
+                        eprintln!("Model Error: {}", e);
+                        std::process::exit(3);
+                    } else {
+                        // General runtime error - exit code 1
+                        eprintln!("Runtime Error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
         }
     }
 }

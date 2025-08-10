@@ -154,3 +154,81 @@ llama-cli embed \
 - Provides production-ready CLI embedding tool
 - Should handle real-world workloads efficiently
 - Focus on user experience and reliability
+
+## Proposed Solution
+
+After analyzing the current codebase, I'll implement the embed command with the following approach:
+
+### 1. Implementation Strategy
+
+The embed command will be implemented in `llama-cli/src/embed.rs` by:
+
+1. **Converting CLI args to EmbeddingConfig**: Map the EmbedArgs to the internal config structure
+2. **Model Loading**: Initialize and load the embedding model using the llama-embedding crate
+3. **Batch Processing**: Use BatchProcessor for efficient text processing with streaming
+4. **Parquet Output**: Write results using the existing ParquetWriter
+5. **Progress Tracking**: Implement progress bars and user feedback
+6. **Error Handling**: Provide clear error messages and recovery
+
+### 2. Key Implementation Details
+
+```rust
+pub async fn run_embed_command(args: EmbedArgs) -> anyhow::Result<()> {
+    // 1. Validate input arguments
+    validate_embed_args(&args)?;
+    
+    // 2. Convert args to embedding config
+    let config = EmbeddingConfig {
+        model_source: ModelSource::from_string(&args.model, args.filename),
+        normalize_embeddings: args.normalize,
+        max_sequence_length: args.max_length,
+        debug: args.debug,
+    };
+    
+    // 3. Initialize and load model
+    let mut embedding_model = EmbeddingModel::new(config).await?;
+    embedding_model.load_model().await?;
+    
+    // 4. Get embedding dimensions and setup writer
+    let embedding_dim = embedding_model.get_embedding_dimension()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine embedding dimensions"))?;
+    
+    // 5. Setup batch processor with progress tracking
+    let model = Arc::new(embedding_model);
+    let mut processor = BatchProcessor::new(model.clone(), args.batch_size);
+    let mut parquet_writer = ParquetWriter::new(&args.output, embedding_dim, args.batch_size)?;
+    
+    // 6. Process file with streaming and progress
+    let mut total_processed = 0;
+    processor.process_file_streaming(&args.input, |batch| {
+        total_processed += batch.len();
+        parquet_writer.write_batch(batch)?;
+        // Update progress display
+        Ok(())
+    }).await?;
+    
+    // 7. Finalize and show results
+    parquet_writer.close()?;
+    println!("Embeddings written to: {}", args.output.display());
+    println!("Total embeddings: {}", total_processed);
+    
+    Ok(())
+}
+```
+
+### 3. Progress Tracking Implementation
+
+Will add console output that matches the specification:
+- Model loading progress with timing
+- Batch processing with progress bars 
+- Throughput statistics
+- Clear error messages
+
+### 4. Integration Points
+
+- Update main.rs to call `crate::embed::run_embed_command(args).await?`
+- Use existing ParquetWriter for output
+- Leverage BatchProcessor streaming capabilities
+- Follow existing error handling patterns
+
+This solution provides a complete end-to-end embed command that integrates all the existing components while providing good user experience with progress tracking and clear feedback.
