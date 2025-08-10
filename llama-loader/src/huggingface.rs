@@ -11,25 +11,22 @@ use llama_cpp_2::{
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-/// Loads a model from HuggingFace
-pub async fn load_huggingface_model(
-    backend: &LlamaBackend,
+/// Loads a model from HuggingFace and returns path info for caching
+pub async fn load_huggingface_model_with_path(
     repo: &str,
     filename: Option<&str>,
     retry_config: &RetryConfig,
-) -> Result<LlamaModel, ModelError> {
+) -> Result<(PathBuf, String), ModelError> {
     info!("Loading HuggingFace model: {}", repo);
 
     // Create HuggingFace API client
     let api = match ApiBuilder::new().build() {
         Ok(api) => api,
         Err(e) => {
-            warn!(
-                "Failed to create HuggingFace API client, falling back to local path: {}",
-                e
-            );
-            let repo_path = PathBuf::from(repo);
-            return load_local_model_fallback(backend, &repo_path, filename).await;
+            return Err(ModelError::Network(format!(
+                "Failed to create HuggingFace API client for {}: {}. Use ModelSource::Local to load from local path instead.",
+                repo, e
+            )));
         }
     };
 
@@ -63,6 +60,19 @@ pub async fn load_huggingface_model(
     };
 
     info!("Model downloaded to: {}", model_path.display());
+
+    Ok((model_path, target_filename))
+}
+
+/// Loads a model from HuggingFace (original function for backward compatibility)
+pub async fn load_huggingface_model(
+    backend: &LlamaBackend,
+    repo: &str,
+    filename: Option<&str>,
+    retry_config: &RetryConfig,
+) -> Result<LlamaModel, ModelError> {
+    // Use the new function to get the path, then load the model
+    let (model_path, _) = load_huggingface_model_with_path(repo, filename, retry_config).await?;
 
     // Load the downloaded model
     let model_params = LlamaModelParams::default();
@@ -101,94 +111,7 @@ pub fn get_all_parts(base_filename: &str) -> Option<Vec<String>> {
     }
 }
 
-/// Fallback to load from local path when HuggingFace API fails
-async fn load_local_model_fallback(
-    backend: &LlamaBackend,
-    folder: &std::path::Path,
-    filename: Option<&str>,
-) -> Result<LlamaModel, ModelError> {
-    info!("Loading model from local folder: {:?}", folder);
 
-    let model_path = if let Some(filename) = filename {
-        let path = folder.join(filename);
-        if !path.exists() {
-            return Err(ModelError::NotFound(format!(
-                "Model file does not exist: {}",
-                path.display()
-            )));
-        }
-        path
-    } else {
-        // Auto-detect with BF16 preference
-        auto_detect_local_model_file(folder).await?
-    };
-
-    info!("Loading model from path: {:?}", model_path);
-    let model_params = LlamaModelParams::default();
-
-    let model = LlamaModel::load_from_file(backend, &model_path, &model_params).map_err(|e| {
-        ModelError::LoadingFailed(format!(
-            "Failed to load model from {}: {}",
-            model_path.display(),
-            e
-        ))
-    })?;
-
-    Ok(model)
-}
-
-/// Auto-detect model file in local directory with BF16 preference
-async fn auto_detect_local_model_file(folder: &std::path::Path) -> Result<PathBuf, ModelError> {
-    let mut gguf_files = Vec::new();
-    let mut bf16_files = Vec::new();
-
-    // Read directory
-    let mut entries = match tokio::fs::read_dir(folder).await {
-        Ok(entries) => entries,
-        Err(e) => {
-            return Err(ModelError::LoadingFailed(format!(
-                "Cannot read directory {}: {}",
-                folder.display(),
-                e
-            )))
-        }
-    };
-
-    while let Some(entry) = entries
-        .next_entry()
-        .await
-        .map_err(|e| ModelError::LoadingFailed(e.to_string()))?
-    {
-        let path = entry.path();
-        if let Some(extension) = path.extension() {
-            if extension == "gguf" {
-                let filename = path.file_name().unwrap().to_string_lossy().to_lowercase();
-                if filename.contains("bf16") {
-                    bf16_files.push(path);
-                } else {
-                    gguf_files.push(path);
-                }
-            }
-        }
-    }
-
-    // Prioritize BF16 files
-    if !bf16_files.is_empty() {
-        info!("Found BF16 model file: {:?}", bf16_files[0]);
-        return Ok(bf16_files[0].clone());
-    }
-
-    // Fallback to first GGUF file
-    if !gguf_files.is_empty() {
-        info!("Found GGUF model file: {:?}", gguf_files[0]);
-        return Ok(gguf_files[0].clone());
-    }
-
-    Err(ModelError::NotFound(format!(
-        "No .gguf model files found in {}",
-        folder.display()
-    )))
-}
 
 #[cfg(test)]
 mod tests {
