@@ -53,3 +53,18 @@ tokio = { workspace = true }
 - This step establishes the foundation without breaking existing functionality
 - Later steps will extract actual logic from llama-agent
 - Focus on establishing clean, extensible architecture
+
+## Proposed Solution
+
+Based on the specification, I will create the foundational `llama-loader` crate with the following approach:
+
+1. **Create Crate Structure**: Set up the basic directory structure and Cargo.toml
+2. **Define Core Types**: 
+   - `LoadedModel` struct to wrap LlamaModel with metadata
+   - `ModelMetadata` struct to track loading information
+   - `ModelLoader` placeholder struct for future implementation
+3. **Error Handling**: Create `ModelError` enum compatible with existing llama-agent error handling
+4. **Module Organization**: Clean separation of concerns with individual modules
+5. **Workspace Integration**: Add to workspace members and establish dependency structure
+
+This foundation will enable future extraction of HuggingFace loading logic while maintaining compatibility with existing code. All existing functionality will remain intact during this phase.
