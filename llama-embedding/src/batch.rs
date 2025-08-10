@@ -516,7 +516,9 @@ impl BatchProcessor {
 
     /// Get statistics about the underlying model
     pub fn get_model_info(&self) -> Option<(usize, bool)> {
-        self.model.get_embedding_dimension().map(|dim| (dim, self.model.is_loaded()))
+        self.model
+            .get_embedding_dimension()
+            .map(|dim| (dim, self.model.is_loaded()))
     }
 
     /// Estimate current memory usage for a batch of texts

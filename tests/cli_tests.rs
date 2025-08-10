@@ -51,12 +51,7 @@ async fn test_cli_version() {
 async fn test_cli_missing_required_args() {
     // Test missing subcommand
     let output = Command::new("cargo")
-        .args([
-            "run",
-            "--manifest-path",
-            "llama-cli/Cargo.toml",
-            "--",
-        ])
+        .args(["run", "--manifest-path", "llama-cli/Cargo.toml", "--"])
         .output()
         .expect("Failed to execute CLI");
 
@@ -153,7 +148,13 @@ async fn test_cli_with_dummy_model() {
 async fn test_cli_argument_parsing() {
     // Test various argument combinations to ensure they parse correctly
     let test_cases = vec![
-        vec!["generate", "--model", "microsoft/DialoGPT-medium", "--prompt", "hello"],
+        vec![
+            "generate",
+            "--model",
+            "microsoft/DialoGPT-medium",
+            "--prompt",
+            "hello",
+        ],
         vec![
             "generate",
             "--model",
@@ -163,7 +164,9 @@ async fn test_cli_argument_parsing() {
             "--prompt",
             "hello",
         ],
-        vec!["generate", "--model", "./models", "--prompt", "hello", "--limit", "100"],
+        vec![
+            "generate", "--model", "./models", "--prompt", "hello", "--limit", "100",
+        ],
         vec![
             "generate",
             "--model",
@@ -293,11 +296,21 @@ async fn test_cli_invalid_argument_values() {
     let test_cases = vec![
         // Invalid numeric values
         (
-            vec!["generate", "--model", "test", "--prompt", "hello", "--limit", "abc"],
+            vec![
+                "generate", "--model", "test", "--prompt", "hello", "--limit", "abc",
+            ],
             "limit",
         ),
         (
-            vec!["generate", "--model", "test", "--prompt", "hello", "--batch-size", "-1"],
+            vec![
+                "generate",
+                "--model",
+                "test",
+                "--prompt",
+                "hello",
+                "--batch-size",
+                "-1",
+            ],
             "batch",
         ),
         (
@@ -373,7 +386,9 @@ async fn test_cli_invalid_argument_values() {
             "temperature",
         ),
         (
-            vec!["generate", "--model", "test", "--prompt", "hello", "--top-p", "1.5"],
+            vec![
+                "generate", "--model", "test", "--prompt", "hello", "--top-p", "1.5",
+            ],
             "top-p",
         ),
     ];
@@ -482,10 +497,22 @@ async fn test_cli_edge_case_values() {
             "--temperature",
             "1.0",
         ],
-        vec!["generate", "--model", "test", "--prompt", "hello", "--top-p", "1.0"],
+        vec![
+            "generate", "--model", "test", "--prompt", "hello", "--top-p", "1.0",
+        ],
         // Minimum values
-        vec!["generate", "--model", "test", "--prompt", "hello", "--limit", "1"],
-        vec!["generate", "--model", "test", "--prompt", "hello", "--batch-size", "1"],
+        vec![
+            "generate", "--model", "test", "--prompt", "hello", "--limit", "1",
+        ],
+        vec![
+            "generate",
+            "--model",
+            "test",
+            "--prompt",
+            "hello",
+            "--batch-size",
+            "1",
+        ],
         vec![
             "generate",
             "--model",
@@ -540,7 +567,9 @@ async fn test_cli_edge_case_values() {
             "--temperature",
             "0.0",
         ],
-        vec!["generate", "--model", "test", "--prompt", "hello", "--top-p", "0.0"],
+        vec![
+            "generate", "--model", "test", "--prompt", "hello", "--top-p", "0.0",
+        ],
     ];
 
     for args in edge_cases {
