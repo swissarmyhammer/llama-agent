@@ -474,6 +474,7 @@ impl RequestQueue {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_batch_request_sync(
         worker_id: usize,
         request_id: String,
