@@ -376,7 +376,7 @@ pub async fn run_agent(args: Args) -> Result<String> {
     agent.add_message(&session.id, message).await?;
 
     // Create generation request
-    let request = GenerationRequest::new(session.id.clone())
+    let request = GenerationRequest::new(session.id)
         .with_max_tokens(args.limit)
         .with_temperature(args.temperature)
         .with_top_p(args.top_p)

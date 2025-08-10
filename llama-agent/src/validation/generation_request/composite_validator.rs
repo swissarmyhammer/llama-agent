@@ -8,21 +8,12 @@ use crate::types::{GenerationRequest, Session};
 use crate::validation::{ValidationError, ValidationResult, Validator};
 
 /// Configuration for the composite generation request validator
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ValidationConfig {
     /// Configuration for message content validation
     pub message_content: MessageContentConfig,
     /// Configuration for parameter validation
     pub parameters: ParameterConfig,
-}
-
-impl Default for ValidationConfig {
-    fn default() -> Self {
-        Self {
-            message_content: MessageContentConfig::default(),
-            parameters: ParameterConfig::default(),
-        }
-    }
 }
 
 /// Composite validator that performs comprehensive validation of generation requests

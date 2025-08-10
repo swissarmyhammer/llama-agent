@@ -572,7 +572,7 @@ impl AgentAPI for AgentServer {
 
             // Create generation request with current session state
             let current_request = GenerationRequest {
-                session_id: working_session.id.clone(),
+                session_id: working_session.id,
                 max_tokens: request.max_tokens,
                 temperature: request.temperature,
                 top_p: request.top_p,
@@ -595,8 +595,8 @@ impl AgentAPI for AgentServer {
             );
 
             // Check if response contains tool calls
-            if let crate::types::FinishReason::Stopped(reason) = &response.finish_reason {
-                if reason == "Tool call detected" {
+            match &response.finish_reason {
+                crate::types::FinishReason::Stopped(reason) if reason == "Tool call detected" => {
                     debug!("Response contains tool calls, processing...");
 
                     // Process tool calls
@@ -645,7 +645,8 @@ impl AgentAPI for AgentServer {
 
                     // Continue the loop to generate response incorporating tool results
                     continue;
-                } else {
+                }
+                crate::types::FinishReason::Stopped(_) => {
                     // No more tool calls, we're done
                     debug!(
                         "Generation completed without tool calls after {} iterations",
@@ -653,13 +654,6 @@ impl AgentAPI for AgentServer {
                     );
                     break;
                 }
-            } else {
-                // No tool call detected, we're done
-                debug!(
-                    "Generation completed without tool calls after {} iterations",
-                    iterations
-                );
-                break;
             }
         }
 
