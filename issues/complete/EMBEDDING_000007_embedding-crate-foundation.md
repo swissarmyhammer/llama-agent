@@ -107,3 +107,41 @@ llama-embedding/
 - Ensure crate compiles and basic types work correctly
 
 This foundation will be ready for the actual EmbeddingModel and BatchProcessor implementations in subsequent issues.
+
+## Proposed Solution
+
+Based on the specification in `./specification/embedding.md` and the current workspace structure, I will implement the foundation for the `llama-embedding` crate with the following approach:
+
+### 1. Crate Structure Creation
+- Create `llama-embedding/` directory at workspace root
+- Set up proper module hierarchy following Rust best practices
+
+### 2. Dependencies Management
+- Add core dependencies: `llama-loader`, `llama-cpp-2`, `tokio`, `md5`, `thiserror`, `tracing`
+- Use workspace dependencies where possible for consistency
+- Focus on library functionality (no CLI dependencies)
+
+### 3. Core Types Definition
+Following the specification exactly:
+- `EmbeddingResult` - contains text, text_hash (MD5), embedding vector, sequence length, processing time
+- `EmbeddingConfig` - configuration struct with model source, batch size, normalization settings
+- `EmbeddingError` - comprehensive error handling with `thiserror` integration
+
+### 4. Module Organization
+```
+llama-embedding/src/
+├── lib.rs          # Public API and re-exports
+├── types.rs        # Core data structures
+├── error.rs        # Error type definitions
+├── model.rs        # EmbeddingModel placeholder
+└── batch.rs        # BatchProcessor placeholder
+```
+
+### 5. Error Handling Strategy
+Implement comprehensive error types that integrate with existing workspace patterns:
+- Model loading errors from `llama-loader`
+- Batch processing errors
+- Text encoding issues
+- IO operations errors
+
+This foundation will be ready for the actual `EmbeddingModel` implementation in subsequent issues.
