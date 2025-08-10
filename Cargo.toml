@@ -47,6 +47,9 @@ tempfile = "3.0"
 proptest = "1.0"
 mockall = "0.12"
 
+# Parquet support via Polars
+polars = { version = "0.41.0", features = ["lazy", "parquet", "dtype-struct", "streaming"] }
+
 # Internal workspace crates
 llama-loader = { path = "llama-loader" }
 
