@@ -59,7 +59,7 @@
 //!     model.load_model().await?;
 //!
 //!     // Create batch processor
-//!     let processor = BatchProcessor::new(Arc::new(model), 32);
+//!     let mut processor = BatchProcessor::new(Arc::new(model), 32);
 //!
 //!     // Process a file containing texts (one per line)
 //!     let results = processor.process_file(Path::new("texts.txt")).await?;
@@ -75,7 +75,7 @@ pub mod model;
 pub mod types;
 
 // Re-export main types for convenience
-pub use batch::BatchProcessor;
+pub use batch::{BatchProcessor, BatchConfig, BatchStats};
 pub use error::{EmbeddingError, EmbeddingResult as Result};
 pub use model::EmbeddingModel;
 pub use types::{EmbeddingConfig, EmbeddingResult};
