@@ -106,3 +106,70 @@ const TEST_TEXTS: &[&str] = &[
 - Will be used to validate CLI integration in later steps
 - Performance benchmarks guide optimization efforts
 - Establishes baseline for production usage
+
+## Proposed Solution
+
+After analyzing the current codebase and specification, I will implement comprehensive integration tests for the llama-embedding library focusing on real-world usage with the Qwen/Qwen3-Embedding-0.6B-GGUF model. 
+
+### Implementation Plan
+
+1. **Test Infrastructure Setup**
+   - Create `real_model_integration_test.rs` for comprehensive integration tests with actual models
+   - Set up test data generator with various text scenarios (multilingual, edge cases, different lengths)
+   - Configure proper test timeouts and performance monitoring
+
+2. **Model Integration Tests**
+   - Single text embedding validation with dimension verification (384 for Qwen model)
+   - HuggingFace model downloading and caching integration
+   - Local model loading fallback scenarios
+   - Model metadata and configuration validation
+
+3. **Batch Processing Validation**
+   - Test batch sizes: 1, 8, 32, 64 with performance monitoring
+   - Memory usage scaling verification
+   - Batch consistency (same results as individual processing)
+   - Edge case handling (empty strings, very long texts)
+
+4. **File Processing Tests**
+   - Streaming file processing with various sizes (10, 100, 1000 texts)
+   - Memory efficiency validation (constant memory usage regardless of file size)
+   - UTF-8 and multilingual text handling
+   - Line-by-line processing accuracy
+
+5. **Performance Requirements**
+   - Benchmark test: 1000 texts processed in under 60 seconds
+   - Memory usage profiling and limits validation
+   - Processing time consistency across batches
+   - GPU/CPU utilization monitoring
+
+6. **Hash Consistency & Error Handling**
+   - MD5 hash determinism across multiple runs
+   - Model loading failure scenarios
+   - Invalid input handling and graceful degradation
+   - Integration with llama-loader error propagation
+
+7. **Cache Integration Testing**
+   - Test shared cache between multiple EmbeddingModel instances
+   - Cache hit/miss performance validation
+   - Model persistence and retrieval accuracy
+   - Cache cleanup and memory leak prevention
+
+### Key Changes
+
+- Create comprehensive test suite in `tests/real_model_integration_test.rs`
+- Add performance monitoring utilities and test helpers
+- Implement test data generation with comprehensive edge cases
+- Add memory usage tracking and validation
+- Create cache integration test scenarios
+- Set up proper test configuration for CI/CD environments
+
+### Success Validation
+
+- All integration tests pass with real Qwen model
+- Performance benchmarks meet specified requirements (< 60s for 1000 texts)
+- Memory usage scales predictably with batch size, not file size
+- Cache integration works correctly with llama-loader
+- Error handling is robust and informative
+- No memory leaks or resource issues detected
+
+This approach ensures the llama-embedding library is production-ready with comprehensive real-world validation.

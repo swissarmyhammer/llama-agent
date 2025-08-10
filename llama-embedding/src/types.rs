@@ -52,7 +52,7 @@ impl EmbeddingResult {
         processing_time_ms: u64,
     ) -> Self {
         let text_hash = format!("{:x}", md5::compute(&text));
-        
+
         Self {
             text,
             text_hash,
@@ -85,12 +85,7 @@ mod tests {
     #[test]
     fn test_embedding_result_creation() {
         let embedding_vec = vec![1.0, 2.0, 3.0];
-        let result = EmbeddingResult::new(
-            "test text".to_string(),
-            embedding_vec.clone(),
-            5,
-            100,
-        );
+        let result = EmbeddingResult::new("test text".to_string(), embedding_vec.clone(), 5, 100);
 
         assert_eq!(result.text, "test text");
         assert_eq!(result.embedding, embedding_vec);
@@ -111,10 +106,14 @@ mod tests {
         );
 
         result.normalize();
-        
+
         // Check that the vector is normalized
         let magnitude: f32 = result.embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((magnitude - 1.0).abs() < 1e-6, "Expected magnitude ~1.0, got {}", magnitude);
+        assert!(
+            (magnitude - 1.0).abs() < 1e-6,
+            "Expected magnitude ~1.0, got {}",
+            magnitude
+        );
         assert!((result.embedding[0] - 0.6).abs() < 1e-6);
         assert!((result.embedding[1] - 0.8).abs() < 1e-6);
     }
@@ -125,7 +124,7 @@ mod tests {
         assert!(!config.normalize_embeddings);
         assert!(config.max_sequence_length.is_none());
         assert!(!config.debug);
-        
+
         match config.model_source {
             ModelSource::HuggingFace { repo, filename } => {
                 assert_eq!(repo, "Qwen/Qwen3-Embedding-0.6B-GGUF");

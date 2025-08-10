@@ -54,23 +54,28 @@ impl BatchStats {
         self.failed_embeddings += failures;
         self.total_processing_time_ms += processing_time_ms;
         self.batches_processed += 1;
-        
+
         if self.total_texts > 0 {
-            self.average_time_per_text_ms = 
+            self.average_time_per_text_ms =
                 self.total_processing_time_ms as f64 / self.total_texts as f64;
         }
-        
+
         if self.batches_processed > 0 {
-            self.average_batch_time_ms = 
+            self.average_batch_time_ms =
                 self.total_processing_time_ms as f64 / self.batches_processed as f64;
         }
     }
-    
-    pub fn update_with_details(&mut self, batch_results: &[EmbeddingResult], processing_time_ms: u64, failures: usize) {
+
+    pub fn update_with_details(
+        &mut self,
+        batch_results: &[EmbeddingResult],
+        processing_time_ms: u64,
+        failures: usize,
+    ) {
         let batch_size = batch_results.len() + failures;
         let token_count: usize = batch_results.iter().map(|r| r.sequence_length).sum();
         let char_count: usize = batch_results.iter().map(|r| r.text.len()).sum();
-        
+
         self.total_texts += batch_size;
         self.successful_embeddings += batch_results.len();
         self.failed_embeddings += failures;
@@ -78,17 +83,17 @@ impl BatchStats {
         self.total_tokens_processed += token_count;
         self.total_characters_processed += char_count;
         self.batches_processed += 1;
-        
+
         // Update averages
         if self.total_texts > 0 {
-            self.average_time_per_text_ms = 
+            self.average_time_per_text_ms =
                 self.total_processing_time_ms as f64 / self.total_texts as f64;
-            self.average_tokens_per_text = 
+            self.average_tokens_per_text =
                 self.total_tokens_processed as f64 / self.successful_embeddings as f64;
         }
-        
+
         if self.batches_processed > 0 {
-            self.average_batch_time_ms = 
+            self.average_batch_time_ms =
                 self.total_processing_time_ms as f64 / self.batches_processed as f64;
         }
     }
@@ -100,7 +105,7 @@ impl BatchStats {
             self.successful_embeddings as f64 / self.total_texts as f64
         }
     }
-    
+
     pub fn throughput_texts_per_second(&self) -> f64 {
         if self.total_processing_time_ms == 0 {
             0.0
@@ -108,7 +113,7 @@ impl BatchStats {
             (self.successful_embeddings as f64) / (self.total_processing_time_ms as f64 / 1000.0)
         }
     }
-    
+
     pub fn throughput_tokens_per_second(&self) -> f64 {
         if self.total_processing_time_ms == 0 {
             0.0
@@ -116,17 +121,17 @@ impl BatchStats {
             (self.total_tokens_processed as f64) / (self.total_processing_time_ms as f64 / 1000.0)
         }
     }
-    
+
     pub fn update_memory_usage(&mut self, current_usage_bytes: usize) {
         if current_usage_bytes > self.peak_memory_usage_bytes {
             self.peak_memory_usage_bytes = current_usage_bytes;
         }
     }
-    
+
     pub fn format_summary(&self) -> String {
         format!(
             "BatchStats {{ texts: {}/{} ({:.1}% success), time: {:.1}s, throughput: {:.1} texts/s, {:.1} tokens/s, memory: {:.2}MB }}",
-            self.successful_embeddings, 
+            self.successful_embeddings,
             self.total_texts,
             self.success_rate() * 100.0,
             self.total_processing_time_ms as f64 / 1000.0,
@@ -195,12 +200,12 @@ impl BatchProcessor {
             progress_callback: None,
         }
     }
-    
+
     /// Set a progress callback for monitoring batch processing
     pub fn set_progress_callback(&mut self, callback: ProgressCallback) {
         self.progress_callback = Some(callback);
     }
-    
+
     /// Clear the progress callback
     pub fn clear_progress_callback(&mut self) {
         self.progress_callback = None;
@@ -214,31 +219,33 @@ impl BatchProcessor {
 
         let start_time = Instant::now();
         debug!("Processing batch of {} texts", texts.len());
-        
+
         // Monitor memory usage if enabled
         if self.config.enable_memory_monitoring {
             let memory_usage = self.estimate_current_memory_usage(texts);
             self.stats.update_memory_usage(memory_usage);
-            
+
             // Check memory limit if configured
             if let Some(limit_mb) = self.config.memory_limit_mb {
                 let limit_bytes = limit_mb * 1024 * 1024;
                 if memory_usage > limit_bytes {
-                    warn!("Memory usage ({:.2}MB) exceeds limit ({:.2}MB)", 
-                          memory_usage as f64 / (1024.0 * 1024.0), 
-                          limit_mb);
-                    return Err(EmbeddingError::batch_processing(
-                        format!("Memory limit exceeded: {:.2}MB > {}MB", 
-                               memory_usage as f64 / (1024.0 * 1024.0), 
-                               limit_mb)
-                    ));
+                    warn!(
+                        "Memory usage ({:.2}MB) exceeds limit ({:.2}MB)",
+                        memory_usage as f64 / (1024.0 * 1024.0),
+                        limit_mb
+                    );
+                    return Err(EmbeddingError::batch_processing(format!(
+                        "Memory limit exceeded: {:.2}MB > {}MB",
+                        memory_usage as f64 / (1024.0 * 1024.0),
+                        limit_mb
+                    )));
                 }
             }
         }
-        
+
         let mut results = Vec::new();
         let mut failures = 0;
-        
+
         for text in texts {
             match self.model.embed_text(text).await {
                 Ok(result) => {
@@ -248,7 +255,7 @@ impl BatchProcessor {
                     failures += 1;
                     let preview = text.chars().take(50).collect::<String>();
                     warn!("Failed to embed text '{}...': {}", preview, e);
-                    
+
                     if !self.config.continue_on_error {
                         return Err(e);
                     }
@@ -256,15 +263,18 @@ impl BatchProcessor {
                 }
             }
         }
-        
+
         let processing_time = start_time.elapsed().as_millis() as u64;
-        self.stats.update_with_details(&results, processing_time, failures);
-        
+        self.stats
+            .update_with_details(&results, processing_time, failures);
+
         debug!(
-            "Processed batch: {} successful, {} failed, {}ms", 
-            results.len(), failures, processing_time
+            "Processed batch: {} successful, {} failed, {}ms",
+            results.len(),
+            failures,
+            processing_time
         );
-        
+
         Ok(results)
     }
 
@@ -274,17 +284,23 @@ impl BatchProcessor {
             return Ok(Vec::new());
         }
 
-        info!("Processing {} texts in batches of {}", texts.len(), self.config.batch_size);
-        let total_batches = (texts.len() + self.config.batch_size - 1) / self.config.batch_size;
+        info!(
+            "Processing {} texts in batches of {}",
+            texts.len(),
+            self.config.batch_size
+        );
+        let total_batches = texts.len().div_ceil(self.config.batch_size);
         let mut all_results = Vec::new();
         let start_time = Instant::now();
-        
+
         for (batch_idx, chunk) in texts.chunks(self.config.batch_size).enumerate() {
             let batch_results = self.process_batch(chunk).await?;
             all_results.extend(batch_results);
-            
+
             // Report progress if enabled and callback is set
-            if self.config.enable_progress_reporting && batch_idx % self.config.progress_report_interval_batches == 0 {
+            if self.config.enable_progress_reporting
+                && batch_idx % self.config.progress_report_interval_batches == 0
+            {
                 if let Some(ref callback) = self.progress_callback {
                     let elapsed_ms = start_time.elapsed().as_millis() as u64;
                     let current_throughput = if elapsed_ms > 0 {
@@ -292,15 +308,16 @@ impl BatchProcessor {
                     } else {
                         0.0
                     };
-                    
+
                     let remaining_batches = total_batches.saturating_sub(batch_idx + 1);
-                    let estimated_remaining_ms = if current_throughput > 0.0 && remaining_batches > 0 {
-                        let remaining_texts = remaining_batches * self.config.batch_size;
-                        ((remaining_texts as f64) / current_throughput * 1000.0) as u64
-                    } else {
-                        0
-                    };
-                    
+                    let estimated_remaining_ms =
+                        if current_throughput > 0.0 && remaining_batches > 0 {
+                            let remaining_texts = remaining_batches * self.config.batch_size;
+                            ((remaining_texts as f64) / current_throughput * 1000.0) as u64
+                        } else {
+                            0
+                        };
+
                     let progress_info = ProgressInfo {
                         current_batch: batch_idx + 1,
                         total_batches,
@@ -312,14 +329,18 @@ impl BatchProcessor {
                         estimated_remaining_ms,
                         current_throughput_texts_per_second: current_throughput,
                     };
-                    
+
                     callback(&progress_info);
                 }
             }
         }
-        
-        info!("Completed processing {} texts with {} results. {}", 
-              texts.len(), all_results.len(), self.stats.format_summary());
+
+        info!(
+            "Completed processing {} texts with {} results. {}",
+            texts.len(),
+            all_results.len(),
+            self.stats.format_summary()
+        );
         Ok(all_results)
     }
 
@@ -335,16 +356,16 @@ impl BatchProcessor {
         info!("Processing file: {}", input_path.display());
         let mut all_results = Vec::new();
         let mut current_batch = Vec::new();
-        
+
         let file = File::open(input_path).await?;
         let reader = BufReader::new(file);
         let mut lines = reader.lines();
-        
+
         while let Some(line) = lines.next_line().await? {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
                 current_batch.push(trimmed.to_string());
-                
+
                 // Process batch when it reaches the configured size
                 if current_batch.len() >= self.config.batch_size {
                     let batch_results = self.process_batch(&current_batch).await?;
@@ -353,22 +374,25 @@ impl BatchProcessor {
                 }
             }
         }
-        
+
         // Process remaining texts in the final batch
         if !current_batch.is_empty() {
             let batch_results = self.process_batch(&current_batch).await?;
             all_results.extend(batch_results);
         }
-        
-        info!("Completed processing file with {} embeddings", all_results.len());
+
+        info!(
+            "Completed processing file with {} embeddings",
+            all_results.len()
+        );
         Ok(all_results)
     }
 
     /// Process a file with streaming results via callback
     pub async fn process_file_streaming<F>(
-        &mut self, 
-        input_path: &Path, 
-        mut callback: F
+        &mut self,
+        input_path: &Path,
+        mut callback: F,
     ) -> Result<()>
     where
         F: FnMut(Vec<EmbeddingResult>) -> std::result::Result<(), EmbeddingError>,
@@ -382,16 +406,16 @@ impl BatchProcessor {
 
         info!("Processing file with streaming: {}", input_path.display());
         let mut current_batch = Vec::new();
-        
+
         let file = File::open(input_path).await?;
         let reader = BufReader::new(file);
         let mut lines = reader.lines();
-        
+
         while let Some(line) = lines.next_line().await? {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
                 current_batch.push(trimmed.to_string());
-                
+
                 // Process and yield batch when it reaches the configured size
                 if current_batch.len() >= self.config.batch_size {
                     let batch_results = self.process_batch(&current_batch).await?;
@@ -400,13 +424,13 @@ impl BatchProcessor {
                 }
             }
         }
-        
+
         // Process and yield remaining texts in the final batch
         if !current_batch.is_empty() {
             let batch_results = self.process_batch(&current_batch).await?;
             callback(batch_results)?;
         }
-        
+
         info!("Completed streaming processing of file");
         Ok(())
     }
@@ -423,30 +447,33 @@ impl BatchProcessor {
             )));
         }
 
-        let (tx, rx) = mpsc::channel::<std::result::Result<Vec<EmbeddingResult>, EmbeddingError>>(100);
+        let (tx, rx) =
+            mpsc::channel::<std::result::Result<Vec<EmbeddingResult>, EmbeddingError>>(100);
         let input_path = input_path.to_path_buf();
         let batch_size = self.config.batch_size;
         let model = self.model.clone();
         let continue_on_error = self.config.continue_on_error;
-        
+
         tokio::spawn(async move {
             let mut processor = BatchProcessor::new(model, batch_size);
             processor.config.continue_on_error = continue_on_error;
-            
-            let result = processor.process_file_streaming(&input_path, |batch_results| {
-                if tx.try_send(Ok(batch_results)).is_err() {
-                    return Err(EmbeddingError::BatchProcessing(
-                        "Channel closed while streaming results".to_string()
-                    ));
-                }
-                Ok(())
-            }).await;
-            
+
+            let result = processor
+                .process_file_streaming(&input_path, |batch_results| {
+                    if tx.try_send(Ok(batch_results)).is_err() {
+                        return Err(EmbeddingError::BatchProcessing(
+                            "Channel closed while streaming results".to_string(),
+                        ));
+                    }
+                    Ok(())
+                })
+                .await;
+
             if let Err(e) = result {
                 let _ = tx.send(Err(e)).await;
             }
         });
-        
+
         Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
     }
 
@@ -489,13 +516,9 @@ impl BatchProcessor {
 
     /// Get statistics about the underlying model
     pub fn get_model_info(&self) -> Option<(usize, bool)> {
-        if let Some(dim) = self.model.get_embedding_dimension() {
-            Some((dim, self.model.is_loaded()))
-        } else {
-            None
-        }
+        self.model.get_embedding_dimension().map(|dim| (dim, self.model.is_loaded()))
     }
-    
+
     /// Estimate current memory usage for a batch of texts
     fn estimate_current_memory_usage(&self, texts: &[String]) -> usize {
         let text_memory = texts.iter().map(|t| t.len()).sum::<usize>();
@@ -506,13 +529,13 @@ impl BatchProcessor {
             // Default assumption for embedding dimension
             texts.len() * 384 * 4
         };
-        
+
         // Add overhead for vectors, strings, and other data structures (rough estimate)
         let overhead = (text_memory + embeddings_memory) / 4;
-        
+
         text_memory + embeddings_memory + overhead
     }
-    
+
     /// Get a detailed performance report
     pub fn get_performance_report(&self) -> String {
         format!(
@@ -555,7 +578,7 @@ mod tests {
     #[test]
     fn test_batch_stats() {
         let mut stats = BatchStats::new();
-        
+
         // Initial state
         assert_eq!(stats.total_texts, 0);
         assert_eq!(stats.successful_embeddings, 0);
@@ -563,7 +586,7 @@ mod tests {
         assert_eq!(stats.success_rate(), 0.0);
         assert_eq!(stats.batches_processed, 0);
         assert_eq!(stats.total_tokens_processed, 0);
-        
+
         // Update with successful batch
         stats.update(10, 1000, 0);
         assert_eq!(stats.total_texts, 10);
@@ -573,7 +596,7 @@ mod tests {
         assert_eq!(stats.average_time_per_text_ms, 100.0);
         assert_eq!(stats.batches_processed, 1);
         assert_eq!(stats.average_batch_time_ms, 1000.0);
-        
+
         // Update with partially failed batch
         stats.update(10, 2000, 2);
         assert_eq!(stats.total_texts, 20);
@@ -601,7 +624,7 @@ mod tests {
     fn test_batch_processor_creation() {
         // Create a dummy config for testing structure
         let _config = EmbeddingConfig::default();
-        
+
         // We can't actually create an EmbeddingModel in unit tests
         // without proper setup, but we can test the structure
         assert_eq!(1, 1); // Placeholder test to verify compilation
@@ -619,10 +642,8 @@ mod tests {
     #[tokio::test]
     async fn test_empty_text_handling() {
         let texts = vec!["".to_string(), "   ".to_string()];
-        let non_empty: Vec<String> = texts.into_iter()
-            .filter(|t| !t.trim().is_empty())
-            .collect();
-        
+        let non_empty: Vec<String> = texts.into_iter().filter(|t| !t.trim().is_empty()).collect();
+
         assert_eq!(non_empty.len(), 0);
     }
 
@@ -635,24 +656,24 @@ mod tests {
         writeln!(temp_file, "line 2").unwrap();
         writeln!(temp_file, "   ").unwrap(); // Whitespace-only line should be skipped
         writeln!(temp_file, "line 3").unwrap();
-        
+
         // Verify file exists and can be read
         let path = temp_file.path();
         assert!(path.exists());
-        
+
         // Test line filtering logic
         let file = File::open(path).await.unwrap();
         let reader = BufReader::new(file);
         let mut lines = reader.lines();
         let mut valid_lines = Vec::new();
-        
+
         while let Some(line) = lines.next_line().await.unwrap() {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
                 valid_lines.push(trimmed.to_string());
             }
         }
-        
+
         assert_eq!(valid_lines.len(), 3);
         assert_eq!(valid_lines, vec!["line 1", "line 2", "line 3"]);
     }
@@ -660,43 +681,43 @@ mod tests {
     #[test]
     fn test_enhanced_batch_stats() {
         let mut stats = BatchStats::new();
-        
+
         // Test throughput calculations
         assert_eq!(stats.throughput_texts_per_second(), 0.0);
         assert_eq!(stats.throughput_tokens_per_second(), 0.0);
-        
+
         // Test memory usage tracking
         stats.update_memory_usage(1024 * 1024); // 1MB
         assert_eq!(stats.peak_memory_usage_bytes, 1024 * 1024);
-        
+
         stats.update_memory_usage(512 * 1024); // 512KB (should not update peak)
         assert_eq!(stats.peak_memory_usage_bytes, 1024 * 1024);
-        
+
         stats.update_memory_usage(2 * 1024 * 1024); // 2MB (should update peak)
         assert_eq!(stats.peak_memory_usage_bytes, 2 * 1024 * 1024);
-        
+
         // Test format_summary doesn't panic
         let summary = stats.format_summary();
         assert!(summary.contains("BatchStats"));
         assert!(summary.contains("texts:"));
         assert!(summary.contains("memory:"));
     }
-    
-    #[test] 
+
+    #[test]
     fn test_enhanced_batch_config() {
         let mut config = BatchConfig::default();
-        
+
         // Test setting memory limit
         config.memory_limit_mb = Some(100);
         assert_eq!(config.memory_limit_mb, Some(100));
-        
+
         // Test progress reporting configuration
         config.enable_progress_reporting = true;
         config.progress_report_interval_batches = 5;
         assert!(config.enable_progress_reporting);
         assert_eq!(config.progress_report_interval_batches, 5);
     }
-    
+
     #[test]
     fn test_progress_info_structure() {
         let progress_info = ProgressInfo {
@@ -710,29 +731,29 @@ mod tests {
             estimated_remaining_ms: 30000,
             current_throughput_texts_per_second: 5.0,
         };
-        
+
         assert_eq!(progress_info.current_batch, 5);
         assert_eq!(progress_info.total_batches, 10);
         assert_eq!(progress_info.texts_processed, 150);
         assert_eq!(progress_info.successful_embeddings, 145);
         assert_eq!(progress_info.current_throughput_texts_per_second, 5.0);
     }
-    
+
     #[test]
     fn test_memory_estimation_concepts() {
         // Test that memory estimation logic is sound
         let texts = vec![
             "short".to_string(),
-            "medium length text".to_string(), 
+            "medium length text".to_string(),
             "this is a much longer text that would require more memory for processing".to_string(),
         ];
-        
+
         // Calculate expected memory manually
         let text_bytes: usize = texts.iter().map(|t| t.len()).sum();
         let embedding_bytes = texts.len() * 384 * 4; // 384 dim * 4 bytes per f32
         let overhead = (text_bytes + embedding_bytes) / 4; // 25% overhead
         let expected = text_bytes + embedding_bytes + overhead;
-        
+
         assert!(expected > text_bytes); // Should be larger than just text
         assert!(expected > embedding_bytes); // Should be larger than just embeddings
     }
