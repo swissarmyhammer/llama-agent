@@ -83,30 +83,31 @@ pub fn validate_embed_args(args: &EmbedArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+use crate::parquet_writer::ParquetWriter;
+use indicatif::{ProgressBar, ProgressStyle};
 use llama_embedding::{BatchProcessor, EmbeddingConfig, EmbeddingModel};
 use llama_loader::ModelSource;
 use std::sync::Arc;
 use std::time::Instant;
-use crate::parquet_writer::ParquetWriter;
 use tracing::info;
-use indicatif::{ProgressBar, ProgressStyle};
 
 impl EmbedArgs {
     /// Convert CLI args to embedding configuration
     fn to_embedding_config(&self) -> EmbeddingConfig {
-        let model_source = if self.model.contains('/') && !std::path::Path::new(&self.model).exists() {
-            // Looks like HuggingFace repo
-            ModelSource::HuggingFace {
-                repo: self.model.clone(),
-                filename: self.filename.clone(),
-            }
-        } else {
-            // Local path
-            ModelSource::Local {
-                folder: std::path::PathBuf::from(&self.model),
-                filename: self.filename.clone(),
-            }
-        };
+        let model_source =
+            if self.model.contains('/') && !std::path::Path::new(&self.model).exists() {
+                // Looks like HuggingFace repo
+                ModelSource::HuggingFace {
+                    repo: self.model.clone(),
+                    filename: self.filename.clone(),
+                }
+            } else {
+                // Local path
+                ModelSource::Local {
+                    folder: std::path::PathBuf::from(&self.model),
+                    filename: self.filename.clone(),
+                }
+            };
 
         EmbeddingConfig {
             model_source,
@@ -121,7 +122,7 @@ impl EmbedArgs {
 pub async fn run_embed_command(args: EmbedArgs) -> anyhow::Result<()> {
     // 1. Validate input arguments
     validate_embed_args(&args)?;
-    
+
     info!("Starting embed command");
     info!("Model: {}", args.model);
     info!("Input: {:?}", args.input);
@@ -133,23 +134,30 @@ pub async fn run_embed_command(args: EmbedArgs) -> anyhow::Result<()> {
 
     // 2. Create embedding config from CLI args
     let config = args.to_embedding_config();
-    
+
     // 3. Initialize embedding model
-    let mut embedding_model = EmbeddingModel::new(config).await
+    let mut embedding_model = EmbeddingModel::new(config)
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to initialize embedding model: {}", e))?;
-    
+
     // 4. Load the model
-    embedding_model.load_model().await
+    embedding_model
+        .load_model()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to load model: {}", e))?;
-    
+
     let load_time = load_start.elapsed();
-    
+
     // 5. Get embedding dimensions for Parquet schema
-    let embedding_dim = embedding_model.get_embedding_dimension()
+    let embedding_dim = embedding_model
+        .get_embedding_dimension()
         .ok_or_else(|| anyhow::anyhow!("Could not determine embedding dimensions"))?;
-    
-    println!("Model loaded successfully in {:.1}s ({} dimensions)", 
-             load_time.as_secs_f64(), embedding_dim);
+
+    println!(
+        "Model loaded successfully in {:.1}s ({} dimensions)",
+        load_time.as_secs_f64(),
+        embedding_dim
+    );
 
     // 6. Set up batch processor and Parquet writer
     let model = Arc::new(embedding_model);
@@ -159,47 +167,58 @@ pub async fn run_embed_command(args: EmbedArgs) -> anyhow::Result<()> {
 
     // 7. Count total lines for progress tracking
     let total_lines = count_non_empty_lines(&args.input).await?;
-    println!("Processing {} texts with batch size {}...", total_lines, args.batch_size);
+    println!(
+        "Processing {} texts with batch size {}...",
+        total_lines, args.batch_size
+    );
 
     // 8. Create progress bar
     let progress_bar = ProgressBar::new(total_lines as u64);
     progress_bar.set_style(
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {msg}")?
-            .progress_chars("██▌ ")
+            .progress_chars("██▌ "),
     );
 
     let processing_start = Instant::now();
     let mut total_processed = 0;
 
     // 9. Process file and write to Parquet with progress tracking
-    processor.process_file_streaming(&args.input, |batch| {
-        let batch_size = batch.len();
-        total_processed += batch_size;
-        
-        // Write batch to Parquet
-        parquet_writer.write_batch(batch)
-            .map_err(|e| llama_embedding::EmbeddingError::batch_processing(format!("Parquet write error: {}", e)))?;
-        
-        // Update progress
-        progress_bar.set_position(total_processed as u64);
-        if total_processed % (args.batch_size * 5) == 0 {  // Update message every 5 batches
-            let elapsed = processing_start.elapsed();
-            let throughput = if elapsed.as_secs() > 0 {
-                total_processed as f64 / elapsed.as_secs_f64()
-            } else {
-                0.0
-            };
-            progress_bar.set_message(format!("{:.1} texts/s", throughput));
-        }
-        
-        Ok(())
-    }).await
-    .map_err(|e| anyhow::anyhow!("Failed to process file: {}", e))?;
+    processor
+        .process_file_streaming(&args.input, |batch| {
+            let batch_size = batch.len();
+            total_processed += batch_size;
+
+            // Write batch to Parquet
+            parquet_writer.write_batch(batch).map_err(|e| {
+                llama_embedding::EmbeddingError::batch_processing(format!(
+                    "Parquet write error: {}",
+                    e
+                ))
+            })?;
+
+            // Update progress
+            progress_bar.set_position(total_processed as u64);
+            if total_processed % (args.batch_size * 5) == 0 {
+                // Update message every 5 batches
+                let elapsed = processing_start.elapsed();
+                let throughput = if elapsed.as_secs() > 0 {
+                    total_processed as f64 / elapsed.as_secs_f64()
+                } else {
+                    0.0
+                };
+                progress_bar.set_message(format!("{:.1} texts/s", throughput));
+            }
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to process file: {}", e))?;
 
     // 10. Finalize progress bar and close writer
     progress_bar.finish_with_message("Processing complete");
-    let records_written = parquet_writer.close()
+    let records_written = parquet_writer
+        .close()
         .map_err(|e| anyhow::anyhow!("Failed to close Parquet writer: {}", e))?;
 
     let total_time = processing_start.elapsed();
@@ -214,10 +233,16 @@ pub async fn run_embed_command(args: EmbedArgs) -> anyhow::Result<()> {
     println!("Processing complete!");
     println!("Total embeddings: {}", total_processed);
     println!("Processing time: {:.1}s", total_time.as_secs_f64());
-    println!("Average processing time: {:.1}ms per text", 
-             total_time.as_millis() as f64 / total_processed as f64);
+    println!(
+        "Average processing time: {:.1}ms per text",
+        total_time.as_millis() as f64 / total_processed as f64
+    );
     println!("Throughput: {:.1} texts/s", throughput);
-    println!("Output written to: {} ({} records)", args.output.display(), records_written);
+    println!(
+        "Output written to: {} ({} records)",
+        args.output.display(),
+        records_written
+    );
 
     // Calculate and show file size
     if let Ok(metadata) = std::fs::metadata(&args.output) {
