@@ -10,11 +10,14 @@ repository = "https://github.com/anthropics/llama-agent"
 [dependencies]
 llama-cpp-2 = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
 hf-hub = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 regex = { workspace = true }
+dirs = "5.0"
+sha2 = "0.10"
+serde_json = "1.0"
 
 [dev-dependencies]
 tempfile = { workspace = true }

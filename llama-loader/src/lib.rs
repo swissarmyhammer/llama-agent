@@ -4,6 +4,7 @@
 //! This crate provides common types and interfaces for loading GGUF models
 //! from HuggingFace and local sources.
 
+pub mod cache;
 pub mod detection;
 pub mod error;
 pub mod huggingface;
@@ -13,6 +14,7 @@ pub mod retry;
 pub mod types;
 
 // Re-export main types for convenience
+pub use cache::{CacheManager, FileMetadata};
 pub use error::ModelError;
 pub use huggingface::load_huggingface_model;
 pub use loader::ModelLoader;
