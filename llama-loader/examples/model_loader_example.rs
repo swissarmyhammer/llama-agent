@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Example of creating cache manager with custom settings
-    let cache_manager = CacheManager::with_default_cache_dir()?
+    let _cache_manager = CacheManager::with_default_cache_dir()?
         .with_max_size_gb(25) // 25GB cache limit
         .with_unlimited_size(); // Actually, no limit
 

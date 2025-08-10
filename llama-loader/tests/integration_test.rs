@@ -16,7 +16,7 @@ async fn create_test_gguf_file(path: &PathBuf, content: &[u8]) -> Result<(), std
 #[tokio::test]
 async fn test_model_loader_creation() {
     let temp_dir = TempDir::new().unwrap();
-    let cache_manager = CacheManager::new(temp_dir.path().to_path_buf());
+    let _cache_manager = CacheManager::new(temp_dir.path().to_path_buf());
     let retry_config = RetryConfig::default();
 
     // Note: We can't create a real LlamaBackend in tests without proper initialization
@@ -39,7 +39,7 @@ async fn test_model_loader_creation() {
 
 #[tokio::test]
 async fn test_model_config_validation() {
-    let temp_dir = TempDir::new().unwrap();
+    let _temp_dir = TempDir::new().unwrap();
 
     // Valid config
     let valid_config = ModelConfig {

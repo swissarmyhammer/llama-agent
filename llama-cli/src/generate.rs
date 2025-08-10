@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::Args;
 use futures::StreamExt;
 use llama_agent::{
     types::{
@@ -14,30 +14,9 @@ use tracing::{error, info, warn};
 
 const SEPARATOR_WIDTH: usize = 60;
 
-#[derive(Parser, Clone)]
-#[command(name = "llama-agent-cli")]
-#[command(about = "A CLI for testing the llama-agent library")]
-#[command(version)]
-#[command(
-    help_template = "{before-help}{name} {version}\n{author-with-newline}{about-with-newline}\n{usage-heading} {usage}\n\n{all-args}{after-help}"
-)]
-#[command(
-    long_about = "A command-line interface for testing the llama-agent library.
-
-Examples:
-  # Use HuggingFace model with auto-detection
-  llama-agent-cli --model microsoft/DialoGPT-medium --prompt \"Hello, how are you?\"
-
-  # Use specific filename from HuggingFace repo
-  llama-agent-cli --model microsoft/DialoGPT-medium --filename model-bf16.gguf --prompt \"What is Rust?\"
-
-  # Use local model folder
-  llama-agent-cli --model ./models/llama2-7b --prompt \"Explain quantum computing\" --limit 200
-
-  # Use local specific file with custom settings
-  llama-agent-cli --model ./models/llama2-7b --filename llama-2-7b.q4_k_m.gguf --prompt \"Write a haiku\" --temperature 0.8 --top-p 0.95"
-)]
-pub struct Args {
+#[derive(Args, Clone)]
+#[command(about = "Generate text using a language model")]
+pub struct GenerateArgs {
     /// Model source: HuggingFace repo (org/model) or local folder path
     #[arg(
         long,
@@ -136,7 +115,7 @@ pub struct Args {
     pub session_timeout: u64,
 }
 
-pub fn validate_args(args: &Args) -> Result<()> {
+pub fn validate_generate_args(args: &GenerateArgs) -> Result<()> {
     // Validate model path
     if args.model.is_empty() {
         return Err(anyhow::anyhow!("Model path cannot be empty"));
@@ -244,10 +223,10 @@ pub fn validate_args(args: &Args) -> Result<()> {
     Ok(())
 }
 
-pub async fn run_agent(args: Args) -> Result<String> {
+pub async fn run_generate(args: GenerateArgs) -> Result<String> {
     let debug_mode = args.debug;
     // Validate arguments
-    validate_args(&args)?;
+    validate_generate_args(&args)?;
 
     // Create model configuration
     let model_config = if args.model.starts_with('/')
