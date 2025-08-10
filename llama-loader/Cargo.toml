@@ -1,0 +1,19 @@
+[package]
+name = "llama-loader"
+version = "0.1.0"
+edition = "2021"
+authors = ["Claude Code Assistant"]
+description = "Shared model loading functionality for llama-agent ecosystem"
+license = "MIT"
+repository = "https://github.com/anthropics/llama-agent"
+
+[dependencies]
+llama-cpp-2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+hf-hub = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -4,45 +4,45 @@ use llama_cpp_2::{context::LlamaContext, llama_batch::LlamaBatch};
 use tracing::{debug, warn};
 
 /// Stopper that detects End-of-Sequence (EOS) tokens to terminate generation.
-/// 
+///
 /// The `EosStopper` is designed to work with the model's natural termination mechanism
 /// by detecting when an End-of-Sequence token is generated. This is the most common
 /// and reliable stopping condition for text generation.
-/// 
+///
 /// ## Architecture
-/// 
+///
 /// This stopper integrates with the standard llama.cpp EOS detection mechanism
 /// rather than reimplementing token detection. The actual EOS detection happens
 /// in the generation loop using `model.is_eog_token(token)`, which is the
 /// standard approach in llama.cpp-based applications.
-/// 
+///
 /// ## Performance
-/// 
+///
 /// EOS detection adds virtually no overhead since it leverages the model's
 /// built-in token classification. The stopper validates configuration and
 /// provides a consistent interface without duplicating the core detection logic.
-/// 
+///
 /// ## Thread Safety
-/// 
+///
 /// `EosStopper` implements `Send` and `Sync` since it only stores the EOS token ID
 /// and has no mutable state during evaluation.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```rust
 /// use llama_agent::stopper::EosStopper;
-/// 
+///
 /// // Create EOS stopper with common EOS token ID
 /// let stopper = EosStopper::new(2);  // Common EOS token ID
-/// 
+///
 /// // Token IDs vary by model:
 /// let gpt_eos = EosStopper::new(50256);     // GPT-style models
 /// let llama_eos = EosStopper::new(2);       // LLaMA-style models  
 /// let custom_eos = EosStopper::new(128001); // Custom tokenizer
 /// ```
-/// 
+///
 /// ## Configuration
-/// 
+///
 /// The EOS token ID should match the model's tokenizer configuration.
 /// Using an incorrect EOS token ID will prevent proper generation termination.
 /// Check your model's tokenizer configuration or use the model's metadata
@@ -50,7 +50,7 @@ use tracing::{debug, warn};
 #[derive(Debug, Clone)]
 pub struct EosStopper {
     /// The token ID that represents End-of-Sequence for this model.
-    /// 
+    ///
     /// This value should match the model's tokenizer configuration.
     /// Common values include:
     /// - 2: LLaMA and similar models
@@ -61,41 +61,41 @@ pub struct EosStopper {
 
 impl EosStopper {
     /// Create a new EOS stopper with the specified token ID.
-    /// 
+    ///
     /// The EOS token ID should match your model's tokenizer configuration.
     /// Providing an incorrect token ID will prevent proper generation termination.
-    /// 
+    ///
     /// ## Determining the Correct EOS Token ID
-    /// 
+    ///
     /// Check your model documentation or tokenizer config for the EOS token ID:
     /// - LLaMA models typically use token ID 2
     /// - GPT-style models often use token ID 50256  
     /// - Custom models may use different values
-    /// 
+    ///
     /// You can also check the model's metadata or use the tokenizer to encode
     /// the EOS string to determine the correct ID.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `eos_token_id` - The token ID that represents End-of-Sequence for the model
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use llama_agent::stopper::EosStopper;
-    /// 
+    ///
     /// // For LLaMA-style models
     /// let llama_stopper = EosStopper::new(2);
-    /// 
+    ///
     /// // For GPT-style models
     /// let gpt_stopper = EosStopper::new(50256);
-    /// 
+    ///
     /// // For models with custom tokenizers
     /// let custom_stopper = EosStopper::new(128001);
     /// ```
-    /// 
+    ///
     /// # Note
-    /// 
+    ///
     /// This constructor always succeeds since any u32 value is potentially
     /// a valid token ID. Validation of the token ID against the actual model
     /// happens during generation when the model's token vocabulary is available.
@@ -105,19 +105,19 @@ impl EosStopper {
     }
 
     /// Get the configured EOS token ID.
-    /// 
+    ///
     /// This method returns the EOS token ID that was configured when creating
     /// this stopper. Useful for debugging or logging purposes.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// The EOS token ID as a u32.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use llama_agent::stopper::EosStopper;
-    /// 
+    ///
     /// let stopper = EosStopper::new(2);
     /// assert_eq!(stopper.eos_token_id(), 2);
     /// ```
@@ -142,7 +142,7 @@ impl Stopper for EosStopper {
 
         // Validate that we have access to the model context
         let _model = &context.model;
-        
+
         // Log debug information about the configured EOS token
         debug!(
             eos_token_id = self.eos_token_id,
@@ -162,13 +162,13 @@ impl Stopper for EosStopper {
         // compatibility with llama.cpp's token handling.
         //
         // Integration points in the generation system:
-        // 1. Token sampling loop checks model.is_eog_token(sampled_token)  
+        // 1. Token sampling loop checks model.is_eog_token(sampled_token)
         // 2. Direct comparison: sampled_token == self.eos_token_id
         // 3. Immediate termination when EOS is detected
         //
         // This design provides the best balance of:
         // - Performance: No duplicate token processing
-        // - Reliability: Uses model's authoritative EOS classification  
+        // - Reliability: Uses model's authoritative EOS classification
         // - Maintainability: Clear separation of concerns
 
         // Always return None - EOS detection handled in sampling loop
