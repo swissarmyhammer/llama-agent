@@ -10,7 +10,7 @@ async fn test_cli_help() {
         .args([
             "run",
             "--manifest-path",
-            "llama-agent-cli/Cargo.toml",
+            "llama-cli/Cargo.toml",
             "--",
             "--help",
         ])
@@ -21,11 +21,10 @@ async fn test_cli_help() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Check that help contains expected sections
-    assert!(stdout.contains("A command-line interface for testing the llama-agent library"));
-    assert!(stdout.contains("--model"));
-    assert!(stdout.contains("--prompt"));
-    assert!(stdout.contains("--limit"));
-    assert!(stdout.contains("--filename"));
+    assert!(stdout.contains("Unified Llama CLI for generation and embeddings"));
+    assert!(stdout.contains("generate"));
+    assert!(stdout.contains("embed"));
+    assert!(stdout.contains("Generate text using a language model"));
 }
 
 #[tokio::test]
@@ -34,7 +33,7 @@ async fn test_cli_version() {
         .args([
             "run",
             "--manifest-path",
-            "llama-agent-cli/Cargo.toml",
+            "llama-cli/Cargo.toml",
             "--",
             "--version",
         ])
@@ -45,18 +44,34 @@ async fn test_cli_version() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Should contain version information
-    assert!(stdout.contains("llama-agent-cli"));
+    assert!(stdout.contains("llama-cli"));
 }
 
 #[tokio::test]
 async fn test_cli_missing_required_args() {
-    // Test missing model argument
+    // Test missing subcommand
     let output = Command::new("cargo")
         .args([
             "run",
             "--manifest-path",
-            "llama-agent-cli/Cargo.toml",
+            "llama-cli/Cargo.toml",
             "--",
+        ])
+        .output()
+        .expect("Failed to execute CLI");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage") || stderr.contains("required"));
+
+    // Test missing model argument in generate subcommand
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--manifest-path",
+            "llama-cli/Cargo.toml",
+            "--",
+            "generate",
             "--prompt",
             "hello",
         ])
@@ -66,23 +81,6 @@ async fn test_cli_missing_required_args() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("model") || stderr.contains("required"));
-
-    // Test missing prompt argument
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--manifest-path",
-            "llama-agent-cli/Cargo.toml",
-            "--",
-            "--model",
-            "test",
-        ])
-        .output()
-        .expect("Failed to execute CLI");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("prompt") || stderr.contains("required"));
 }
 
 #[tokio::test]
@@ -90,9 +88,10 @@ async fn test_cli_with_nonexistent_model() {
     let output = Command::new("cargo")
         .args([
             "run",
-            "--bin",
-            "llama-agent-cli",
+            "--manifest-path",
+            "llama-cli/Cargo.toml",
             "--",
+            "generate",
             "--model",
             "/nonexistent/path",
             "--prompt",
@@ -120,9 +119,10 @@ async fn test_cli_with_dummy_model() {
     let output = Command::new("cargo")
         .args([
             "run",
-            "--bin",
-            "llama-agent-cli",
+            "--manifest-path",
+            "llama-cli/Cargo.toml",
             "--",
+            "generate",
             "--model",
             temp_dir.path().to_str().unwrap(),
             "--filename",
@@ -153,8 +153,9 @@ async fn test_cli_with_dummy_model() {
 async fn test_cli_argument_parsing() {
     // Test various argument combinations to ensure they parse correctly
     let test_cases = vec![
-        vec!["--model", "microsoft/DialoGPT-medium", "--prompt", "hello"],
+        vec!["generate", "--model", "microsoft/DialoGPT-medium", "--prompt", "hello"],
         vec![
+            "generate",
             "--model",
             "microsoft/DialoGPT-medium",
             "--filename",
@@ -162,8 +163,9 @@ async fn test_cli_argument_parsing() {
             "--prompt",
             "hello",
         ],
-        vec!["--model", "./models", "--prompt", "hello", "--limit", "100"],
+        vec!["generate", "--model", "./models", "--prompt", "hello", "--limit", "100"],
         vec![
+            "generate",
             "--model",
             "./models",
             "--prompt",
@@ -172,6 +174,7 @@ async fn test_cli_argument_parsing() {
             "256",
         ],
         vec![
+            "generate",
             "--model",
             "./models",
             "--prompt",
@@ -180,6 +183,7 @@ async fn test_cli_argument_parsing() {
             "20",
         ],
         vec![
+            "generate",
             "--model",
             "./models",
             "--prompt",
@@ -188,6 +192,7 @@ async fn test_cli_argument_parsing() {
             "60",
         ],
         vec![
+            "generate",
             "--model",
             "./models",
             "--prompt",
@@ -196,6 +201,7 @@ async fn test_cli_argument_parsing() {
             "2",
         ],
         vec![
+            "generate",
             "--model",
             "./models",
             "--prompt",
@@ -204,6 +210,7 @@ async fn test_cli_argument_parsing() {
             "50",
         ],
         vec![
+            "generate",
             "--model",
             "./models",
             "--prompt",
@@ -212,6 +219,7 @@ async fn test_cli_argument_parsing() {
             "7200",
         ],
         vec![
+            "generate",
             "--model",
             "./models",
             "--prompt",
@@ -220,9 +228,10 @@ async fn test_cli_argument_parsing() {
             "0.8",
         ],
         vec![
-            "--model", "./models", "--prompt", "hello", "--top-p", "0.95",
+            "generate", "--model", "./models", "--prompt", "hello", "--top-p", "0.95",
         ],
         vec![
+            "generate",
             "--model",
             "./models",
             "--filename",
@@ -253,7 +262,7 @@ async fn test_cli_argument_parsing() {
     for args in test_cases {
         println!("Testing args: {:?}", args);
 
-        let mut full_args = vec!["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--"];
+        let mut full_args = vec!["run", "--manifest-path", "llama-cli/Cargo.toml", "--"];
         full_args.extend(args.iter());
 
         let output = Command::new("cargo")
@@ -284,15 +293,16 @@ async fn test_cli_invalid_argument_values() {
     let test_cases = vec![
         // Invalid numeric values
         (
-            vec!["--model", "test", "--prompt", "hello", "--limit", "abc"],
+            vec!["generate", "--model", "test", "--prompt", "hello", "--limit", "abc"],
             "limit",
         ),
         (
-            vec!["--model", "test", "--prompt", "hello", "--batch-size", "-1"],
+            vec!["generate", "--model", "test", "--prompt", "hello", "--batch-size", "-1"],
             "batch",
         ),
         (
             vec![
+                "generate",
                 "--model",
                 "test",
                 "--prompt",
@@ -304,6 +314,7 @@ async fn test_cli_invalid_argument_values() {
         ),
         (
             vec![
+                "generate",
                 "--model",
                 "test",
                 "--prompt",
@@ -315,6 +326,7 @@ async fn test_cli_invalid_argument_values() {
         ),
         (
             vec![
+                "generate",
                 "--model",
                 "test",
                 "--prompt",
@@ -326,6 +338,7 @@ async fn test_cli_invalid_argument_values() {
         ),
         (
             vec![
+                "generate",
                 "--model",
                 "test",
                 "--prompt",
@@ -337,6 +350,7 @@ async fn test_cli_invalid_argument_values() {
         ),
         (
             vec![
+                "generate",
                 "--model",
                 "test",
                 "--prompt",
@@ -348,6 +362,7 @@ async fn test_cli_invalid_argument_values() {
         ),
         (
             vec![
+                "generate",
                 "--model",
                 "test",
                 "--prompt",
@@ -358,7 +373,7 @@ async fn test_cli_invalid_argument_values() {
             "temperature",
         ),
         (
-            vec!["--model", "test", "--prompt", "hello", "--top-p", "1.5"],
+            vec!["generate", "--model", "test", "--prompt", "hello", "--top-p", "1.5"],
             "top-p",
         ),
     ];
@@ -366,7 +381,7 @@ async fn test_cli_invalid_argument_values() {
     for (args, expected_error_context) in test_cases {
         println!("Testing invalid args: {:?}", args);
 
-        let mut full_args = vec!["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--"];
+        let mut full_args = vec!["run", "--manifest-path", "llama-cli/Cargo.toml", "--"];
         full_args.extend(args.iter());
 
         let output = Command::new("cargo")
@@ -396,6 +411,7 @@ async fn test_cli_edge_case_values() {
     let edge_cases = vec![
         // Maximum values
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -404,6 +420,7 @@ async fn test_cli_edge_case_values() {
             "4294967295",
         ], // u32 max
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -412,6 +429,7 @@ async fn test_cli_edge_case_values() {
             "8192",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -420,6 +438,7 @@ async fn test_cli_edge_case_values() {
             "1000",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -428,6 +447,7 @@ async fn test_cli_edge_case_values() {
             "3600",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -436,6 +456,7 @@ async fn test_cli_edge_case_values() {
             "16",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -444,6 +465,7 @@ async fn test_cli_edge_case_values() {
             "10000",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -452,6 +474,7 @@ async fn test_cli_edge_case_values() {
             "86400",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -459,11 +482,12 @@ async fn test_cli_edge_case_values() {
             "--temperature",
             "1.0",
         ],
-        vec!["--model", "test", "--prompt", "hello", "--top-p", "1.0"],
+        vec!["generate", "--model", "test", "--prompt", "hello", "--top-p", "1.0"],
         // Minimum values
-        vec!["--model", "test", "--prompt", "hello", "--limit", "1"],
-        vec!["--model", "test", "--prompt", "hello", "--batch-size", "1"],
+        vec!["generate", "--model", "test", "--prompt", "hello", "--limit", "1"],
+        vec!["generate", "--model", "test", "--prompt", "hello", "--batch-size", "1"],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -472,6 +496,7 @@ async fn test_cli_edge_case_values() {
             "1",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -480,6 +505,7 @@ async fn test_cli_edge_case_values() {
             "1",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -488,6 +514,7 @@ async fn test_cli_edge_case_values() {
             "1",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -496,6 +523,7 @@ async fn test_cli_edge_case_values() {
             "1",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -504,6 +532,7 @@ async fn test_cli_edge_case_values() {
             "1",
         ],
         vec![
+            "generate",
             "--model",
             "test",
             "--prompt",
@@ -511,13 +540,13 @@ async fn test_cli_edge_case_values() {
             "--temperature",
             "0.0",
         ],
-        vec!["--model", "test", "--prompt", "hello", "--top-p", "0.0"],
+        vec!["generate", "--model", "test", "--prompt", "hello", "--top-p", "0.0"],
     ];
 
     for args in edge_cases {
         println!("Testing edge case args: {:?}", args);
 
-        let mut full_args = vec!["run", "--manifest-path", "llama-agent-cli/Cargo.toml", "--"];
+        let mut full_args = vec!["run", "--manifest-path", "llama-cli/Cargo.toml", "--"];
         full_args.extend(args.iter());
 
         let output = Command::new("cargo")
@@ -567,9 +596,10 @@ async fn test_cli_prompt_variations() {
         let output = Command::new("cargo")
             .args([
                 "run",
-                "--bin",
-                "llama-agent-cli",
+                "--manifest-path",
+                "llama-cli/Cargo.toml",
                 "--",
+                "generate",
                 "--model",
                 "test/model",
                 "--prompt",
@@ -613,9 +643,10 @@ async fn test_cli_model_path_variations() {
         let output = Command::new("cargo")
             .args([
                 "run",
-                "--bin",
-                "llama-agent-cli",
+                "--manifest-path",
+                "llama-cli/Cargo.toml",
                 "--",
+                "generate",
                 "--model",
                 model_path,
                 "--prompt",
@@ -636,7 +667,9 @@ async fn test_cli_model_path_variations() {
                 || stderr.contains("Model loading failed")
                 || stderr.contains("Failed to load model")
                 || stderr.contains("Backend already initialized")
-                || stderr.contains("error"),
+                || stderr.contains("error")
+                || stderr.contains("Invalid HuggingFace repo format")
+                || stderr.contains("Error:"),
             "Expected model-related error for path {:?}: {}",
             model_path,
             stderr

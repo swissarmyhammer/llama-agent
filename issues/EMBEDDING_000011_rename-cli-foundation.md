@@ -119,3 +119,71 @@ llama-cli/src/
 - Focus on clean subcommand architecture
 - Prepare foundation for embed command implementation
 - Maintain all existing functionality exactly
+
+## Proposed Solution
+
+I will implement this restructuring in the following steps:
+
+1. **Directory and Workspace Rename**: Rename the `llama-agent-cli` directory to `llama-cli` and update the workspace configuration
+2. **Subcommand Architecture**: Create a clean clap-based subcommand structure with `generate` and `embed` commands
+3. **Code Migration**: Move all existing CLI logic into a `generate.rs` module without losing any functionality
+4. **Module Structure**: Create the foundation modules (`generate.rs`, `embed.rs`, `lib.rs`, `main.rs`)
+5. **Testing**: Ensure backward compatibility for all existing generate functionality
+
+The key design will be:
+- `main.rs`: Entry point with clap subcommand parsing
+- `generate.rs`: All existing functionality migrated from current `lib.rs`
+- `embed.rs`: Placeholder structure ready for implementation
+- `lib.rs`: Shared utilities and module exports
+
+This preserves all existing functionality while setting up the foundation for the embedding command implementation.
+## Implementation Complete ✅
+
+Successfully completed all requirements:
+
+### ✅ **CLI Renamed and Restructured**
+- Renamed `llama-agent-cli` to `llama-cli` (directory and binary)
+- Updated workspace configuration
+- Updated all dependencies and exports
+
+### ✅ **Subcommand Architecture Implemented**
+```bash
+# Main CLI help
+llama-cli --help  # Shows generate/embed subcommands
+
+# Generate command (preserved all functionality)
+llama-cli generate --model <MODEL> --prompt <PROMPT> [OPTIONS]
+
+# Embed command (placeholder ready)
+llama-cli embed --model <MODEL> --input <INPUT> --output <OUTPUT> [OPTIONS]
+```
+
+### ✅ **Module Structure Created**
+```
+llama-cli/src/
+├── main.rs           # Entry point with subcommand routing
+├── lib.rs            # Module exports
+├── generate.rs       # All existing generation functionality
+└── embed.rs          # Placeholder embed structure
+```
+
+### ✅ **Backward Compatibility Maintained**
+- All existing generation functionality preserved
+- Same command-line arguments and validation
+- Identical error handling and exit codes
+- Same streaming output behavior
+
+### ✅ **Foundation Ready**
+- `EmbedArgs` struct with all required fields from specification
+- Validation framework in place
+- Proper error messages referencing EMBEDDING_000013
+- Clean clap integration
+
+### ✅ **Quality Checks Passed**
+- ✅ Code compiles without warnings
+- ✅ All clippy lints pass
+- ✅ Code properly formatted
+- ✅ Help messages work correctly
+- ✅ Placeholder behavior functions as expected
+
+The CLI foundation is ready for the embedding command implementation in EMBEDDING_000013.

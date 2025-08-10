@@ -1,19 +1,21 @@
 [package]
-name = "llama-agent-cli"
+name = "llama-cli"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "llama-agent-cli"
+name = "llama-cli"
 path = "src/main.rs"
 
 [lib]
-name = "llama_agent_cli"
+name = "llama_cli"
 path = "src/lib.rs"
 
 [dependencies]
-# Reference to the core library
+# Workspace crates
 llama-agent = { path = "../llama-agent" }
+llama-loader = { workspace = true }
+llama-embedding = { path = "../llama-embedding" }
 
 # CLI
 clap = { workspace = true }
@@ -24,6 +26,7 @@ futures = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 
 # Utilities
 tracing = { workspace = true }

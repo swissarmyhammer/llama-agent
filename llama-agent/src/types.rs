@@ -941,7 +941,6 @@ mod tests {
 
         match &reasons[4] {
             FinishReason::Stopped(msg) => assert_eq!(msg, "Error: test error"),
-            _ => panic!("Wrong variant"),
         }
     }
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["llama-agent", "llama-agent-cli", "llama-loader", "llama-embedding"]
+members = ["llama-agent", "llama-cli", "llama-loader", "llama-embedding"]
 resolver = "2"
 
 [workspace.dependencies]

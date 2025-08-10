@@ -1,5 +1,5 @@
 use anyhow::Result;
-use llama_agent_cli::{run_agent, Args};
+use llama_cli::{run_generate, GenerateArgs};
 use tokio::test;
 use tracing_subscriber;
 
@@ -14,24 +14,24 @@ async fn test_cli_integration_with_qwen_model() -> Result<()> {
 
     // Create Args struct with the same parameters as the manual test
     // cargo run --package llama-agent-cli -- --model unsloth/Qwen3-0.6B-GGUF --prompt "What is an apple?" --limit 64
-    let args = Args {
+    let args = GenerateArgs {
         model: "unsloth/Qwen3-0.6B-GGUF".to_string(),
         filename: None,
         prompt: "What is an apple?".to_string(),
         limit: 64,
+        temperature: 0.7,
+        top_p: 0.9,
+        debug: false, // Keep debug off to avoid verbose output in tests
         batch_size: 512,
         max_queue_size: 10,
         request_timeout: 120,
         worker_threads: 1,
         max_sessions: 10,
         session_timeout: 3600,
-        temperature: 0.7,
-        top_p: 0.9,
-        debug: false, // Keep debug off to avoid verbose output in tests
     };
 
     // Run the agent and verify it completes successfully
-    let result = run_agent(args).await;
+    let result = run_generate(args).await;
 
     // Verify the result is Ok and contains some generated text
     match result {
@@ -44,7 +44,6 @@ async fn test_cli_integration_with_qwen_model() -> Result<()> {
             assert!(response.len() > 10, "Response should be substantial");
 
             // Log the response for manual inspection during test runs if needed
-            #[cfg(feature = "test-logging")]
             eprintln!("Generated response: {}", response);
 
             Ok(())
@@ -64,63 +63,63 @@ async fn test_cli_argument_validation() -> Result<()> {
         .try_init();
 
     // Test with empty model - should fail validation
-    let args_empty_model = Args {
+    let args_empty_model = GenerateArgs {
         model: "".to_string(),
         filename: None,
         prompt: "Test prompt".to_string(),
         limit: 64,
+        temperature: 0.7,
+        top_p: 0.9,
+        debug: false,
         batch_size: 512,
         max_queue_size: 10,
         request_timeout: 120,
         worker_threads: 1,
         max_sessions: 10,
         session_timeout: 3600,
-        temperature: 0.7,
-        top_p: 0.9,
-        debug: false,
     };
 
-    let result = run_agent(args_empty_model).await;
+    let result = run_generate(args_empty_model).await;
     assert!(result.is_err(), "Should fail validation with empty model");
 
     // Test with empty prompt - should fail validation
-    let args_empty_prompt = Args {
+    let args_empty_prompt = GenerateArgs {
         model: "unsloth/Qwen3-0.6B-GGUF".to_string(),
         filename: None,
         prompt: "".to_string(),
         limit: 64,
+        temperature: 0.7,
+        top_p: 0.9,
+        debug: false,
         batch_size: 512,
         max_queue_size: 10,
         request_timeout: 120,
         worker_threads: 1,
         max_sessions: 10,
         session_timeout: 3600,
-        temperature: 0.7,
-        top_p: 0.9,
-        debug: false,
     };
 
-    let result = run_agent(args_empty_prompt).await;
+    let result = run_generate(args_empty_prompt).await;
     assert!(result.is_err(), "Should fail validation with empty prompt");
 
     // Test with invalid temperature - should fail validation
-    let args_invalid_temp = Args {
+    let args_invalid_temp = GenerateArgs {
         model: "unsloth/Qwen3-0.6B-GGUF".to_string(),
         filename: None,
         prompt: "Test prompt".to_string(),
         limit: 64,
+        temperature: 3.0, // Invalid - should be <= 2.0
+        top_p: 0.9,
+        debug: false,
         batch_size: 512,
         max_queue_size: 10,
         request_timeout: 120,
         worker_threads: 1,
         max_sessions: 10,
         session_timeout: 3600,
-        temperature: 3.0, // Invalid - should be <= 2.0
-        top_p: 0.9,
-        debug: false,
     };
 
-    let result = run_agent(args_invalid_temp).await;
+    let result = run_generate(args_invalid_temp).await;
     assert!(
         result.is_err(),
         "Should fail validation with invalid temperature"
@@ -137,24 +136,24 @@ async fn test_cli_with_different_token_limits() -> Result<()> {
         .try_init();
 
     // Test with a very small token limit
-    let args_small_limit = Args {
+    let args_small_limit = GenerateArgs {
         model: "unsloth/Qwen3-0.6B-GGUF".to_string(),
         filename: None,
         prompt: "What is an apple?".to_string(),
         limit: 10, // Very small limit
+        temperature: 0.7,
+        top_p: 0.9,
+        debug: false,
         batch_size: 512,
         max_queue_size: 10,
         request_timeout: 120,
         worker_threads: 1,
         max_sessions: 10,
         session_timeout: 3600,
-        temperature: 0.7,
-        top_p: 0.9,
-        debug: false,
     };
 
     // This should still work, just with a shorter response
-    let result = run_agent(args_small_limit).await;
+    let result = run_generate(args_small_limit).await;
     assert!(result.is_ok(), "Should work with small token limit");
 
     if let Ok(response) = result {
