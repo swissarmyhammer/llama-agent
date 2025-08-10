@@ -14,7 +14,6 @@ static GLOBAL_BACKEND: OnceLock<Arc<LlamaBackend>> = OnceLock::new();
 
 /// Core embedding model that handles individual text embedding operations
 pub struct EmbeddingModel {
-    loader: Arc<ModelLoader>,
     model: Option<LlamaModel>,
     config: EmbeddingConfig,
     metadata: Option<ModelMetadata>,
@@ -27,13 +26,7 @@ impl EmbeddingModel {
         // Initialize or get global backend
         let backend = Self::get_or_init_backend()?;
         
-        // Create model loader
-        let mut loader = ModelLoader::new(backend.clone())
-            .map_err(EmbeddingError::ModelLoader)?;
-        loader.initialize().await.map_err(EmbeddingError::ModelLoader)?;
-        
         Ok(Self {
-            loader: Arc::new(loader),
             model: None,
             config,
             metadata: None,
@@ -58,14 +51,12 @@ impl EmbeddingModel {
 
         // Load the model using the loader
         let loaded_model = {
-            // We need to get a mutable reference to the loader
-            // Since Arc<ModelLoader> doesn't provide this, we need to restructure
-            // For now, let's create a new loader instance
-            let mut temp_loader = ModelLoader::new(self.backend.clone())
+            // Create a new loader for model loading since we need mutable access
+            let mut loader = ModelLoader::new(self.backend.clone())
                 .map_err(EmbeddingError::ModelLoader)?;
-            temp_loader.initialize().await.map_err(EmbeddingError::ModelLoader)?;
+            loader.initialize().await.map_err(EmbeddingError::ModelLoader)?;
             
-            temp_loader.load_model(&model_config).await
+            loader.load_model(&model_config).await
                 .map_err(EmbeddingError::ModelLoader)?
         };
 
