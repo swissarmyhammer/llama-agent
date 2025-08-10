@@ -7,8 +7,8 @@ use llama_cpp_2::{
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use std::time::Instant;
+use tracing::info;
 
 /// Manages loading of LLAMA models from various sources
 pub struct ModelLoader {
@@ -166,8 +166,6 @@ impl ModelLoader {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::path::PathBuf;
 
     // Note: Integration tests would go here for ModelLoader methods
     // These require a real LlamaBackend and are better suited for integration tests
