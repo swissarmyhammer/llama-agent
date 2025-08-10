@@ -1,0 +1,22 @@
+Normal text line
+Line with null character: text
+Incomplete UTF-8 sequence: invalid
+Line with only whitespace:     
+	
+Another line with only tabs and spaces   	
+Control characters in text: text	text
+Very long line with no breaks thatgoesonfromuchlongerthannormalandtestshowthesystemhandleslonglinessincesometextfilesmightcontainverylonglineswithoutproperlinebreaksthatcouldcauseparsingissuesormemoryproblemsifnothandledcorrectlysoweincludethisascasejusttomakesurethesystemcanhandleitgracefully
+Binary-like content: ������
+Malformed JSON: {"key": "value", incomplete
+XML-like but malformed: <tag>content</unclosed>
+SQL injection attempt: '; DROP TABLE users; --
+Script content: <script>alert('test')</script>
+Path traversal: ../../etc/passwd
+Command injection: $(rm -rf /)
+Line with many quotes: """""""""""""""""
+Line with many backslashes: \\\\\\\\\\\\\\\\
+Unmatched brackets: ((((((((((((
+Mixed line endings in single line
+Zero-width characters:​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​text​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​
+Non-printable ASCII: 
+Surrogate pairs and invalid Unicode: 𝕏𝔼𝕏𝔼𝕏𝔼𝕏𝔼

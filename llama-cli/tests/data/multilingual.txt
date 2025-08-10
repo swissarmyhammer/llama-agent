@@ -1,0 +1,24 @@
+Hello world, this is an English sentence.
+Hola mundo, esta es una oración en español.
+Bonjour le monde, ceci est une phrase en français.
+Hallo Welt, das ist ein deutscher Satz.
+こんにちは世界、これは日本語の文章です。
+你好世界，这是一个中文句子。
+Привет мир, это предложение на русском языке.
+مرحبا بالعالم، هذه جملة باللغة العربية.
+नमस्ते दुनिया, यह एक हिंदी वाक्य है।
+Olá mundo, esta é uma frase em português.
+Ciao mondo, questa è una frase in italiano.
+안녕하세요 세상, 이것은 한국어 문장입니다.
+Γεια σας κόσμε, αυτή είναι μια πρόταση στα ελληνικά.
+שלום עולם, זה משפט בעברית.
+Hej världen, det här är en mening på svenska.
+Hei maailma, tämä on lause suomeksi.
+Witaj świecie, to jest zdanie w języku polskim.
+Привіт світе, це речення українською мовою.
+Zdravo svijete, ovo je rečenica na srpskom jeziku.
+Ahoj světe, toto je věta v češtině.
+Mixed: Hello 世界! ¿Cómo está 안녕하세요?
+Special chars: !@#$%^&*()_+-=[]{}|;:'",./<>?
+Numbers and symbols: 123 + 456 = 579, π ≈ 3.14159
+Unicode symbols: ⚡ ⭐ 🌟 🚀 🔬 🧪 💻 🔒
