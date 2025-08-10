@@ -16,4 +16,4 @@ pub mod types;
 pub use error::ModelError;
 pub use huggingface::load_huggingface_model;
 pub use loader::ModelLoader;
-pub use types::{LoadedModel, ModelMetadata, ModelSource, RetryConfig};
+pub use types::{LoadedModel, ModelConfig, ModelMetadata, ModelSource, RetryConfig};
