@@ -1,0 +1,36 @@
+
+This line has leading and trailing spaces.   
+	This line has tabs at the beginning.
+This is a very short text.
+This is an extremely long text that goes on for quite a while and contains multiple clauses with various punctuation marks, including commas, semicolons, and other symbols, designed to test how the system handles longer sequences of text that might exceed typical processing limits or require special handling due to their length and complexity, and it continues with more detailed information about various topics including technology, science, mathematics, literature, history, geography, biology, chemistry, physics, astronomy, and many other academic subjects that could be encountered in real-world text processing scenarios.
+Special characters: !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
+Unicode characters: éñüöäß çñ 北京 москва العالم हिंदी 한국어
+Emoji and symbols: 😀 😃 😄 😁 🚀 🌟 ⭐ 💻 🔬 🧪 ⚡ 🔒 
+Numbers: 123 456.789 -987.654 1,000,000 3.14159 2.71828
+Repeated words: test test test test test test test test test
+    Extra    spacing    between    words    in    this    line.
+Mixed CaSe TeXt WiTh IrReGuLaR cApItAlIzAtIoN pAtTeRnS.
+ALLCAPITALLETTERSWITHNOSPACESBETWEENWORDS
+alllowercaseletterswithnospacesbetweenwords
+123numbersatthebeginning of text
+Text with numbers 123 in the 456 middle 789 of sentence
+EndingWithNumbers123456789
+()Parentheses at beginning and end()
+[Square brackets at beginning and end]
+{Curly braces at beginning and end}
+"Double quotes around the entire text"
+'Single quotes around the entire text'
+`Backticks around the entire text`
+Line with\ttabs\tand\tspaces\tcombined.
+Line break in the middle
+of this text entry
+URL: https://www.example.com/path?param=value&other=123
+Email: user@domain.com and another.email+test@sub.domain.co.uk
+Date formats: 2024-01-15, 01/15/2024, Jan 15 2024, 15-Jan-2024
+Time formats: 14:30:25, 2:30 PM, 14:30:25.123
+Scientific notation: 1.23e-4, 5.67E+8, -2.34e-10
+Roman numerals: I II III IV V VI VII VIII IX X
+Greek letters: α β γ δ ε ζ η θ ι κ λ μ ν ξ ο π ρ σ τ υ φ χ ψ ω
+Mathematical symbols: ∑ ∏ ∫ ∂ ∇ ∞ ≈ ≠ ≤ ≥ ± × ÷ √ ∝ ∈ ∀ ∃
+Currency symbols: $ £ € ¥ ₹ ₽ ₩ ¢ ₪ ₫
+Arrow symbols: ← → ↑ ↓ ↔ ↕ ⇐ ⇒ ⇑ ⇓ ⇔ ⇕
