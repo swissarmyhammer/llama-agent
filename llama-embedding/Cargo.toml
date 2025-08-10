@@ -1,0 +1,23 @@
+[package]
+name = "llama-embedding"
+version = "0.1.0"
+edition = "2021"
+description = "Batch text embedding functionality using llama-cpp-2"
+license = "MIT"
+repository = "https://github.com/wballard/llama-agent"
+
+[lib]
+name = "llama_embedding"
+crate-type = ["lib"]
+
+[dependencies]
+llama-loader = { workspace = true }
+llama-cpp-2 = { workspace = true }
+tokio = { workspace = true }
+md5 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio-test = "0.4"
