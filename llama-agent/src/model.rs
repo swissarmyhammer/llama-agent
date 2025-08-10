@@ -1,14 +1,12 @@
-use crate::types::{ModelConfig, ModelError, ModelSource};
+use crate::types::{ModelConfig, ModelError};
 use llama_cpp_2::{
     context::{params::LlamaContextParams, LlamaContext},
     llama_backend::LlamaBackend,
-    model::{params::LlamaModelParams, LlamaModel},
+    model::{LlamaModel},
     send_logs_to_tracing, LogOptions,
 };
-use llama_loader::load_huggingface_model;
-use std::path::{Path, PathBuf};
+use llama_loader::{ModelLoader, ModelMetadata};
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 // Need access to raw FFI bindings for llama_log_set
@@ -47,7 +45,8 @@ pub struct ModelManager {
     model: Arc<RwLock<Option<LlamaModel>>>,
     backend: Arc<LlamaBackend>,
     config: ModelConfig,
-    load_start_time: Option<Instant>,
+    loader: RwLock<Option<ModelLoader>>,
+    metadata: RwLock<Option<ModelMetadata>>,
     memory_usage_bytes: Arc<std::sync::atomic::AtomicU64>,
 }
 
@@ -102,58 +101,66 @@ impl ModelManager {
             model: Arc::new(RwLock::new(None)),
             backend,
             config,
-            load_start_time: None,
+            loader: RwLock::new(None),
+            metadata: RwLock::new(None),
             memory_usage_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         };
         Ok(manager)
     }
 
-    pub async fn load_model(self: &Arc<Self>) -> Result<(), ModelError> {
-        let start_time = Instant::now();
-        // Note: load_start_time is not mutable in Arc context, using local timing
+    /// Initialize the ModelLoader (must be called after construction)
+    pub async fn initialize_loader(&self) -> Result<(), ModelError> {
+        let mut loader = ModelLoader::new(self.backend.clone())?;
+        loader.initialize().await?;
+        *self.loader.write().await = Some(loader);
+        Ok(())
+    }
 
+    pub async fn load_model(&self) -> Result<(), ModelError> {
         info!("Loading model with configuration: {:?}", self.config);
 
         // Validate config before proceeding
         self.config.validate()?;
 
+        // Ensure loader is initialized
+        {
+            let loader_guard = self.loader.read().await;
+            if loader_guard.is_none() {
+                drop(loader_guard);
+                self.initialize_loader().await?;
+            }
+        }
+
         // Log memory usage before loading
         let memory_before = Self::get_process_memory_mb().unwrap_or(0);
         debug!("Memory usage before model loading: {} MB", memory_before);
 
-        // Load model based on source type with progress indication
-        let model = match &self.config.source {
-            ModelSource::HuggingFace { repo, filename } => {
-                info!("Starting HuggingFace model download/loading for: {}", repo);
-                self.load_huggingface_model(repo, filename.as_deref())
-                    .await?
-            }
-            ModelSource::Local { folder, filename } => {
-                info!("Loading local model from: {}", folder.display());
-                self.load_local_model(folder, filename.as_deref()).await?
-            }
+        // Load model using ModelLoader
+        let loaded_model = {
+            let mut loader_guard = self.loader.write().await;
+            loader_guard.as_mut().unwrap().load_model(&self.config).await?
         };
 
-        let load_time = start_time.elapsed();
         let memory_after = Self::get_process_memory_mb().unwrap_or(0);
         let memory_used = memory_after.saturating_sub(memory_before);
 
-        // Store memory usage estimate (atomic operation safe in Arc)
+        // Store memory usage estimate
         self.memory_usage_bytes.store(
             memory_used * 1024 * 1024,
             std::sync::atomic::Ordering::Relaxed,
         );
 
         info!(
-            "Model loaded successfully in {:?} (Memory: +{} MB, Total: {} MB)",
-            load_time, memory_used, memory_after
+            "Model loaded successfully in {:?} (Memory: +{} MB, Total: {} MB, Cache Hit: {})",
+            loaded_model.metadata.load_time, memory_used, memory_after, loaded_model.metadata.cache_hit
         );
 
-        // Store model
+        // Store model and metadata
         {
             let mut model_lock = self.model.write().await;
-            *model_lock = Some(model);
+            *model_lock = Some(loaded_model.model);
         }
+        *self.metadata.write().await = Some(loaded_model.metadata);
 
         Ok(())
     }
@@ -192,102 +199,6 @@ impl ModelManager {
             .map_err(move |e| ModelError::LoadingFailed(format!("Failed to create context: {}", e)))
     }
 
-    async fn load_huggingface_model(
-        &self,
-        repo: &str,
-        filename: Option<&str>,
-    ) -> Result<LlamaModel, ModelError> {
-        // Delegate to llama-loader
-        load_huggingface_model(&self.backend, repo, filename, &self.config.retry_config).await
-    }
-
-    async fn load_local_model(
-        &self,
-        folder: &Path,
-        filename: Option<&str>,
-    ) -> Result<LlamaModel, ModelError> {
-        info!("Loading model from local folder: {:?}", folder);
-
-        let model_path = if let Some(filename) = filename {
-            let path = folder.join(filename);
-            if !path.exists() {
-                return Err(ModelError::NotFound(format!(
-                    "Model file does not exist: {}",
-                    path.display()
-                )));
-            }
-            path
-        } else {
-            // Auto-detect with BF16 preference
-            self.auto_detect_model_file(folder).await?
-        };
-
-        info!("Loading model from path: {:?}", model_path);
-        let model_params = LlamaModelParams::default();
-
-        let model =
-            LlamaModel::load_from_file(&self.backend, &model_path, &model_params).map_err(|e| {
-                ModelError::LoadingFailed(format!(
-                    "Failed to load model from {}: {}",
-                    model_path.display(),
-                    e
-                ))
-            })?;
-
-        Ok(model)
-    }
-
-    async fn auto_detect_model_file(&self, folder: &Path) -> Result<PathBuf, ModelError> {
-        let mut gguf_files = Vec::new();
-        let mut bf16_files = Vec::new();
-
-        // Read directory
-        let mut entries = match tokio::fs::read_dir(folder).await {
-            Ok(entries) => entries,
-            Err(e) => {
-                return Err(ModelError::LoadingFailed(format!(
-                    "Cannot read directory {}: {}",
-                    folder.display(),
-                    e
-                )))
-            }
-        };
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| ModelError::LoadingFailed(e.to_string()))?
-        {
-            let path = entry.path();
-            if let Some(extension) = path.extension() {
-                if extension == "gguf" {
-                    let filename = path.file_name().unwrap().to_string_lossy().to_lowercase();
-                    if filename.contains("bf16") {
-                        bf16_files.push(path);
-                    } else {
-                        gguf_files.push(path);
-                    }
-                }
-            }
-        }
-
-        // Prioritize BF16 files
-        if !bf16_files.is_empty() {
-            info!("Found BF16 model file: {:?}", bf16_files[0]);
-            return Ok(bf16_files[0].clone());
-        }
-
-        // Fallback to first GGUF file
-        if !gguf_files.is_empty() {
-            info!("Found GGUF model file: {:?}", gguf_files[0]);
-            return Ok(gguf_files[0].clone());
-        }
-
-        Err(ModelError::NotFound(format!(
-            "No .gguf model files found in {}",
-            folder.display()
-        )))
-    }
 
     /// Get current process memory usage in MB
     fn get_process_memory_mb() -> Result<u64, std::io::Error> {
@@ -348,12 +259,17 @@ impl ModelManager {
     }
 
     /// Get model loading statistics
-    pub fn get_load_stats(&self) -> Option<(std::time::Duration, u64)> {
-        self.load_start_time.map(|start| {
-            let duration = start.elapsed();
+    pub async fn get_load_stats(&self) -> Option<(std::time::Duration, u64)> {
+        let metadata_guard = self.metadata.read().await;
+        metadata_guard.as_ref().map(|meta| {
             let memory_bytes = self.get_memory_usage_bytes();
-            (duration, memory_bytes)
+            (meta.load_time, memory_bytes)
         })
+    }
+
+    /// Get model metadata
+    pub async fn get_metadata(&self) -> Option<ModelMetadata> {
+        self.metadata.read().await.clone()
     }
 }
 
@@ -425,7 +341,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             Some("test-model.gguf".to_string()),
         );
-        let manager = Arc::new(ModelManager::new(config).expect("Failed to create ModelManager"));
+        let manager = ModelManager::new(config).expect("Failed to create ModelManager");
 
         // This should fail because dummy content is not a valid GGUF model
         let result = manager.load_model().await;
@@ -440,7 +356,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             Some("nonexistent.gguf".to_string()),
         );
-        let manager = Arc::new(ModelManager::new(config).expect("Failed to create ModelManager"));
+        let manager = ModelManager::new(config).expect("Failed to create ModelManager");
 
         let result = manager.load_model().await;
         assert!(result.is_err());
@@ -460,7 +376,6 @@ mod tests {
         // When running tests in parallel, the backend might already be initialized by another test
         match ModelManager::new(config) {
             Ok(manager) => {
-                let manager = Arc::new(manager);
                 let result = manager.load_model().await;
                 assert!(result.is_err());
                 match result.unwrap_err() {
@@ -495,7 +410,7 @@ mod tests {
         fs::write(&another_model, b"another model").await.unwrap();
 
         let config = create_test_config_local(temp_dir.path().to_path_buf(), None);
-        let manager = Arc::new(ModelManager::new(config).expect("Failed to create ModelManager"));
+        let manager = ModelManager::new(config).expect("Failed to create ModelManager");
 
         // This should try to load the BF16 file first (though it will fail with invalid content)
         let result = manager.load_model().await;
@@ -515,7 +430,6 @@ mod tests {
         // When running tests in parallel, the backend might already be initialized by another test
         match ModelManager::new(config) {
             Ok(manager) => {
-                let manager = Arc::new(manager);
                 let result = manager.load_model().await;
                 assert!(result.is_err());
                 match result.unwrap_err() {
@@ -547,7 +461,6 @@ mod tests {
                 // Test that we can create the manager (HF loading will treat repo as local path and fail)
                 assert!(!manager.is_loaded().await);
 
-                let manager = Arc::new(manager);
                 let result = manager.load_model().await;
                 assert!(result.is_err()); // Will fail since "microsoft/DialoGPT-medium" is not a local path
             }

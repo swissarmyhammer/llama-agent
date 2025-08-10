@@ -488,9 +488,10 @@ impl AgentAPI for AgentServer {
         config.validate()?;
 
         // Initialize model manager
-        let model_manager = Arc::new(ModelManager::new(config.model.clone())?);
+        let model_manager = ModelManager::new(config.model.clone())?;
         model_manager.load_model().await?;
         info!("Model manager initialized and model loaded");
+        let model_manager = Arc::new(model_manager);
 
         // Initialize request queue
         let request_queue = Arc::new(RequestQueue::new(
