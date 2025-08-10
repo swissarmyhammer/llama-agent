@@ -39,6 +39,9 @@ futures = { workspace = true }
 # HuggingFace integration  
 hf-hub = { workspace = true }
 
+# Shared model loading
+llama-loader = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 proptest = { workspace = true }

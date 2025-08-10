@@ -46,6 +46,9 @@ tempfile = "3.0"
 proptest = "1.0"
 mockall = "0.12"
 
+# Internal workspace crates
+llama-loader = { path = "llama-loader" }
+
 # Workspace-level package for integration tests
 [package]
 name = "llama-agent-workspace"

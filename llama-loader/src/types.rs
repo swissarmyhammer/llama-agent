@@ -72,6 +72,57 @@ pub enum ModelSource {
     },
 }
 
+/// Configuration for model loading
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelConfig {
+    /// The source from which to load the model
+    pub source: ModelSource,
+    /// Batch size for model operations
+    pub batch_size: u32,
+    /// Whether to use HuggingFace parameters
+    pub use_hf_params: bool,
+    /// Configuration for retry logic
+    pub retry_config: RetryConfig,
+    /// Enable debug output
+    pub debug: bool,
+}
+
+impl Default for ModelConfig {
+    fn default() -> Self {
+        Self {
+            source: ModelSource::HuggingFace {
+                repo: "microsoft/DialoGPT-medium".to_string(),
+                filename: None,
+            },
+            batch_size: 512,
+            use_hf_params: true,
+            retry_config: RetryConfig::default(),
+            debug: false,
+        }
+    }
+}
+
+impl ModelConfig {
+    /// Validate the model configuration
+    pub fn validate(&self) -> Result<(), crate::error::ModelError> {
+        self.source.validate()?;
+
+        if self.batch_size == 0 {
+            return Err(crate::error::ModelError::InvalidConfig(
+                "Batch size must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.batch_size > 8192 {
+            return Err(crate::error::ModelError::InvalidConfig(
+                "Batch size should not exceed 8192 for most models".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 impl ModelSource {
     /// Validate that the model source configuration is valid
     pub fn validate(&self) -> Result<(), crate::error::ModelError> {

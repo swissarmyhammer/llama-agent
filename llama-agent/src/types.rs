@@ -1,11 +1,16 @@
 use async_trait::async_trait;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use ulid::Ulid;
+
+#[cfg(test)]
+use std::path::PathBuf;
+
+// Re-export model types from llama-loader
+pub use llama_loader::{ModelConfig, ModelError, ModelSource, RetryConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SessionId(Ulid);
@@ -537,49 +542,8 @@ pub struct AgentConfig {
     pub session_config: SessionConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RetryConfig {
-    /// Maximum number of retry attempts
-    pub max_retries: u32,
-    /// Initial delay between retries in milliseconds
-    pub initial_delay_ms: u64,
-    /// Multiplier for exponential backoff
-    pub backoff_multiplier: f64,
-    /// Maximum delay between retries in milliseconds
-    pub max_delay_ms: u64,
-}
 
-impl Default for RetryConfig {
-    fn default() -> Self {
-        Self {
-            max_retries: 3,
-            initial_delay_ms: 1000, // 1 second
-            backoff_multiplier: 2.0,
-            max_delay_ms: 30000, // 30 seconds
-        }
-    }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelConfig {
-    pub source: ModelSource,
-    pub batch_size: u32,
-    pub use_hf_params: bool,
-    pub retry_config: RetryConfig,
-    pub debug: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ModelSource {
-    HuggingFace {
-        repo: String,
-        filename: Option<String>,
-    },
-    Local {
-        folder: PathBuf,
-        filename: Option<String>,
-    },
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueConfig {
@@ -603,20 +567,6 @@ impl Default for SessionConfig {
     }
 }
 
-impl Default for ModelConfig {
-    fn default() -> Self {
-        Self {
-            source: ModelSource::HuggingFace {
-                repo: "microsoft/DialoGPT-medium".to_string(),
-                filename: None,
-            },
-            batch_size: 512,
-            use_hf_params: true,
-            retry_config: RetryConfig::default(),
-            debug: false,
-        }
-    }
-}
 
 impl Default for QueueConfig {
     fn default() -> Self {
@@ -628,116 +578,7 @@ impl Default for QueueConfig {
     }
 }
 
-impl ModelConfig {
-    pub fn validate(&self) -> Result<(), ModelError> {
-        self.source.validate()?;
 
-        if self.batch_size == 0 {
-            return Err(ModelError::InvalidConfig(
-                "Batch size must be greater than 0".to_string(),
-            ));
-        }
-
-        if self.batch_size > 8192 {
-            return Err(ModelError::InvalidConfig(
-                "Batch size should not exceed 8192 for most models".to_string(),
-            ));
-        }
-
-        Ok(())
-    }
-}
-
-impl ModelSource {
-    pub fn validate(&self) -> Result<(), ModelError> {
-        match self {
-            ModelSource::HuggingFace { repo, filename } => {
-                if repo.is_empty() {
-                    return Err(ModelError::InvalidConfig(
-                        "HuggingFace repo name cannot be empty".to_string(),
-                    ));
-                }
-
-                // Validate repo format (should contain at least one '/')
-                if !repo.contains('/') {
-                    return Err(ModelError::InvalidConfig(
-                        "HuggingFace repo must be in format 'org/repo'".to_string(),
-                    ));
-                }
-
-                // Check for invalid characters
-                if repo
-                    .chars()
-                    .any(|c| !c.is_alphanumeric() && !"-_./".contains(c))
-                {
-                    return Err(ModelError::InvalidConfig(
-                        "Invalid characters in HuggingFace repo name".to_string(),
-                    ));
-                }
-
-                if let Some(f) = filename {
-                    if f.is_empty() {
-                        return Err(ModelError::InvalidConfig(
-                            "Filename cannot be empty".to_string(),
-                        ));
-                    }
-                    if !f.ends_with(".gguf") {
-                        return Err(ModelError::InvalidConfig(
-                            "Model file must have .gguf extension".to_string(),
-                        ));
-                    }
-                }
-
-                Ok(())
-            }
-            ModelSource::Local { folder, filename } => {
-                if !folder.exists() {
-                    return Err(ModelError::NotFound(format!(
-                        "Local folder does not exist: {}",
-                        folder.display()
-                    )));
-                }
-
-                if !folder.is_dir() {
-                    return Err(ModelError::InvalidConfig(format!(
-                        "Path is not a directory: {}",
-                        folder.display()
-                    )));
-                }
-
-                if let Some(f) = filename {
-                    if f.is_empty() {
-                        return Err(ModelError::InvalidConfig(
-                            "Filename cannot be empty".to_string(),
-                        ));
-                    }
-                    if !f.ends_with(".gguf") {
-                        return Err(ModelError::InvalidConfig(
-                            "Model file must have .gguf extension".to_string(),
-                        ));
-                    }
-
-                    let full_path = folder.join(f);
-                    if !full_path.exists() {
-                        return Err(ModelError::NotFound(format!(
-                            "Model file does not exist: {}",
-                            full_path.display()
-                        )));
-                    }
-
-                    if !full_path.is_file() {
-                        return Err(ModelError::InvalidConfig(format!(
-                            "Path is not a file: {}",
-                            full_path.display()
-                        )));
-                    }
-                }
-
-                Ok(())
-            }
-        }
-    }
-}
 
 impl QueueConfig {
     pub fn validate(&self) -> Result<(), QueueError> {
@@ -877,20 +718,6 @@ pub enum AgentError {
     QueueFull { capacity: usize },
 }
 
-#[derive(Debug, Error)]
-pub enum ModelError {
-    #[error("Model loading failed: {0}\n🔧 Check available memory (4-8GB needed), verify GGUF file integrity, ensure compatible llama.cpp version")]
-    LoadingFailed(String),
-
-    #[error("Model not found: {0}\n📁 Verify file path is correct, file exists and is readable. For HuggingFace: check repo name and filename")]
-    NotFound(String),
-
-    #[error("Invalid model config: {0}\n⚙️ Ensure batch_size > 0, valid model source path, and appropriate use_hf_params setting")]
-    InvalidConfig(String),
-
-    #[error("Model inference failed: {0}\n🦾 Check input format, model compatibility, and available system resources")]
-    InferenceFailed(String),
-}
 
 #[derive(Debug, Clone, Error)]
 pub enum QueueError {
