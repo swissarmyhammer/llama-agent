@@ -35,6 +35,9 @@ tracing-subscriber = { workspace = true }
 # Parquet support
 polars = { workspace = true }
 
+# Progress bars
+indicatif = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
