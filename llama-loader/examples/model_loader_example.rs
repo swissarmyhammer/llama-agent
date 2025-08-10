@@ -1,8 +1,7 @@
 /// Example demonstrating the ModelLoader API
 /// This example shows how to use ModelLoader with both HuggingFace and local models
-use llama_loader::{CacheManager, ModelConfig, ModelLoader, ModelSource, RetryConfig};
+use llama_loader::{CacheManager, ModelConfig, ModelSource, RetryConfig};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

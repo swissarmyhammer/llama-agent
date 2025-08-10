@@ -1,7 +1,5 @@
-use llama_loader::{CacheManager, ModelConfig, ModelLoader, ModelSource, RetryConfig};
-use llama_cpp_2::llama_backend::LlamaBackend;
+use llama_loader::{CacheManager, ModelConfig, ModelSource, RetryConfig};
 use std::path::PathBuf;
-use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;

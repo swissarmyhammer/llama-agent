@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn test_module_exists() {
-        // Basic test to ensure the module compiles
-        assert!(true);
+        // Basic test to ensure the module compiles correctly
+        // If this test runs, the module definition is valid
     }
 }
