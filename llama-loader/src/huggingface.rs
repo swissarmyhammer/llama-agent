@@ -11,13 +11,12 @@ use llama_cpp_2::{
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-/// Loads a model from HuggingFace
-pub async fn load_huggingface_model(
-    backend: &LlamaBackend,
+/// Loads a model from HuggingFace and returns path info for caching
+pub async fn load_huggingface_model_with_path(
     repo: &str,
     filename: Option<&str>,
     retry_config: &RetryConfig,
-) -> Result<LlamaModel, ModelError> {
+) -> Result<(PathBuf, String), ModelError> {
     info!("Loading HuggingFace model: {}", repo);
 
     // Create HuggingFace API client
@@ -29,7 +28,7 @@ pub async fn load_huggingface_model(
                 e
             );
             let repo_path = PathBuf::from(repo);
-            return load_local_model_fallback(backend, &repo_path, filename).await;
+            return load_local_model_path_fallback(&repo_path, filename).await;
         }
     };
 
@@ -63,6 +62,19 @@ pub async fn load_huggingface_model(
     };
 
     info!("Model downloaded to: {}", model_path.display());
+
+    Ok((model_path, target_filename))
+}
+
+/// Loads a model from HuggingFace (original function for backward compatibility)
+pub async fn load_huggingface_model(
+    backend: &LlamaBackend,
+    repo: &str,
+    filename: Option<&str>,
+    retry_config: &RetryConfig,
+) -> Result<LlamaModel, ModelError> {
+    // Use the new function to get the path, then load the model
+    let (model_path, _) = load_huggingface_model_with_path(repo, filename, retry_config).await?;
 
     // Load the downloaded model
     let model_params = LlamaModelParams::default();
@@ -99,6 +111,36 @@ pub fn get_all_parts(base_filename: &str) -> Option<Vec<String>> {
     } else {
         None
     }
+}
+
+/// Fallback to load from local path when HuggingFace API fails (for path-only version)
+async fn load_local_model_path_fallback(
+    folder: &std::path::Path,
+    filename: Option<&str>,
+) -> Result<(PathBuf, String), ModelError> {
+    info!("Loading model from local folder: {:?}", folder);
+
+    let model_path = if let Some(filename) = filename {
+        let path = folder.join(filename);
+        if !path.exists() {
+            return Err(ModelError::NotFound(format!(
+                "Model file does not exist: {}",
+                path.display()
+            )));
+        }
+        path
+    } else {
+        // Auto-detect with BF16 preference
+        auto_detect_local_model_file(folder).await?
+    };
+
+    let filename = model_path
+        .file_name()
+        .ok_or_else(|| ModelError::LoadingFailed("Invalid model file path".to_string()))?
+        .to_string_lossy()
+        .to_string();
+
+    Ok((model_path, filename))
 }
 
 /// Fallback to load from local path when HuggingFace API fails
