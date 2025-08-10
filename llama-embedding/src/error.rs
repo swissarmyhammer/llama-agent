@@ -87,7 +87,10 @@ mod tests {
 
         let error = EmbeddingError::ModelNotLoaded;
         assert!(matches!(error, EmbeddingError::ModelNotLoaded));
-        assert_eq!(error.to_string(), "Model not loaded - call load_model() first");
+        assert_eq!(
+            error.to_string(),
+            "Model not loaded - call load_model() first"
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! # llama-embedding
 //!
 //! Text embedding functionality using llama-cpp-2 with batch processing support.
-//! This crate provides a reusable library for generating text embeddings using 
+//! This crate provides a reusable library for generating text embeddings using
 //! GGUF models via the llama-cpp-2 Rust bindings.
 //!
 //! ## Features
@@ -75,7 +75,7 @@ pub mod model;
 pub mod types;
 
 // Re-export main types for convenience
-pub use batch::{BatchProcessor, BatchConfig, BatchStats, ProgressInfo, ProgressCallback};
+pub use batch::{BatchConfig, BatchProcessor, BatchStats, ProgressCallback, ProgressInfo};
 pub use error::{EmbeddingError, EmbeddingResult as Result};
 pub use model::EmbeddingModel;
 pub use types::{EmbeddingConfig, EmbeddingResult};
@@ -93,7 +93,7 @@ mod tests {
         let _config: Option<EmbeddingConfig> = None;
         let _error: Option<EmbeddingError> = None;
         let _result: Option<EmbeddingResult> = None;
-        
+
         // Test passes if this compiles
         assert!(true);
     }
@@ -105,7 +105,7 @@ mod tests {
             repo: "test/repo".to_string(),
             filename: None,
         };
-        
+
         // Test passes if this compiles
         assert!(true);
     }
