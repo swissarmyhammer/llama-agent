@@ -1,6 +1,6 @@
 use crate::error::ModelError;
 use crate::huggingface::load_huggingface_model;
-use crate::types::{LoadedModel, ModelSource, RetryConfig, ModelMetadata};
+use crate::types::{LoadedModel, ModelMetadata, ModelSource, RetryConfig};
 use llama_cpp_2::{
     llama_backend::LlamaBackend,
     model::{params::LlamaModelParams, LlamaModel},
@@ -30,9 +30,9 @@ impl ModelLoader {
     ) -> Result<LoadedModel, ModelError> {
         let start_time = Instant::now();
         info!("Loading HuggingFace model: {}", repo);
-        
+
         let model = load_huggingface_model(&self.backend, repo, filename, retry_config).await?;
-        
+
         let load_time = start_time.elapsed();
         let metadata = ModelMetadata {
             source: ModelSource::HuggingFace {
@@ -44,7 +44,7 @@ impl ModelLoader {
             load_time,
             cache_hit: false, // Would need cache implementation to track this
         };
-        
+
         Ok(LoadedModel {
             model,
             path: PathBuf::new(), // Would need to return path from load_huggingface_model
@@ -78,8 +78,8 @@ impl ModelLoader {
         info!("Loading model from path: {:?}", model_path);
         let model_params = LlamaModelParams::default();
 
-        let model = LlamaModel::load_from_file(&self.backend, &model_path, &model_params)
-            .map_err(|e| {
+        let model =
+            LlamaModel::load_from_file(&self.backend, &model_path, &model_params).map_err(|e| {
                 ModelError::LoadingFailed(format!(
                     "Failed to load model from {}: {}",
                     model_path.display(),
@@ -169,7 +169,7 @@ mod tests {
 
     // Note: Integration tests would go here for ModelLoader methods
     // These require a real LlamaBackend and are better suited for integration tests
-    
+
     #[test]
     fn test_model_loader_creation() {
         // We can't create a real LlamaBackend in unit tests
