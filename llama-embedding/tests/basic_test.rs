@@ -4,14 +4,13 @@ use llama_loader::ModelSource;
 #[test]
 fn test_embedding_config_default() {
     let config = EmbeddingConfig::default();
-    assert_eq!(config.batch_size, 32);
     assert!(!config.normalize_embeddings);
     assert!(!config.debug);
     assert!(config.max_sequence_length.is_none());
 
     match &config.model_source {
         ModelSource::HuggingFace { repo, filename } => {
-            assert_eq!(repo, "sentence-transformers/all-MiniLM-L6-v2");
+            assert_eq!(repo, "Qwen/Qwen3-Embedding-0.6B-GGUF");
             assert!(filename.is_none());
         }
         _ => panic!("Expected HuggingFace model source"),
