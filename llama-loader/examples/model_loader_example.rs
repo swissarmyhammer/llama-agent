@@ -59,11 +59,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         modified_time: 1234567890,
     };
 
-    let cache_key = CacheManager::generate_cache_key(
-        "microsoft/DialoGPT-medium",
-        "model.gguf",
-        &file_metadata,
-    );
+    let cache_key =
+        CacheManager::generate_cache_key("microsoft/DialoGPT-medium", "model.gguf", &file_metadata);
 
     println!("Generated cache key: {}", cache_key);
 

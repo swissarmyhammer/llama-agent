@@ -1,7 +1,7 @@
+use crate::{EmbeddingConfig, EmbeddingError, EmbeddingResult};
+use llama_cpp_2::model::LlamaModel;
+use llama_loader::{LoadedModel, ModelLoader, ModelMetadata};
 use std::sync::Arc;
-use llama_cpp_2::{model::LlamaModel};
-use llama_loader::{ModelLoader, LoadedModel, ModelMetadata};
-use crate::{EmbeddingConfig, EmbeddingResult, EmbeddingError};
 
 /// Main embedding model for generating text embeddings
 pub struct EmbeddingModel {
@@ -17,7 +17,7 @@ impl EmbeddingModel {
         // TODO: Initialize ModelLoader based on config
         // This is a placeholder implementation
         Err(EmbeddingError::InvalidConfiguration(
-            "EmbeddingModel::new not yet implemented".to_string()
+            "EmbeddingModel::new not yet implemented".to_string(),
         ))
     }
 

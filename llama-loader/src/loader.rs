@@ -9,7 +9,7 @@ use llama_cpp_2::{
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// Manages loading of LLAMA models from various sources with caching support
 pub struct ModelLoader {
@@ -51,7 +51,7 @@ impl ModelLoader {
     /// Load a model from the specified configuration with cache support
     pub async fn load_model(&mut self, config: &ModelConfig) -> Result<LoadedModel, ModelError> {
         config.validate()?;
-        
+
         let _start_time = Instant::now();
         info!("Loading model from config: {:?}", config.source);
 
@@ -78,8 +78,9 @@ impl ModelLoader {
         debug!("Loading HuggingFace model with cache support: {}", repo);
 
         // Load from HuggingFace (this handles download and multi-part logic)
-        let (model_path, actual_filename) = 
-            self.load_hf_model_to_path(repo, filename, retry_config).await?;
+        let (model_path, actual_filename) = self
+            .load_hf_model_to_path(repo, filename, retry_config)
+            .await?;
 
         // Get file metadata for cache key generation
         let file_metadata = FileMetadata::from_path(&model_path).await?;
@@ -87,21 +88,23 @@ impl ModelLoader {
 
         // Check if we already have this model in cache
         let cached_path = self.cache_manager.get_cached_model(&cache_key).await;
-        
+
         let (final_path, cache_hit) = if let Some(cached) = cached_path {
             info!("Using cached model: {}", cached.display());
             (cached, true)
         } else {
             // Cache the newly downloaded model
             debug!("Caching model: {}", model_path.display());
-            self.cache_manager.cache_model(&model_path, &cache_key).await?;
+            self.cache_manager
+                .cache_model(&model_path, &cache_key)
+                .await?;
             (model_path, false)
         };
 
         // Load the model using llama-cpp-2
         let model_params = LlamaModelParams::default();
-        let model = LlamaModel::load_from_file(&self.backend, &final_path, &model_params)
-            .map_err(|e| {
+        let model =
+            LlamaModel::load_from_file(&self.backend, &final_path, &model_params).map_err(|e| {
                 ModelError::LoadingFailed(format!(
                     "Failed to load model from {}: {}",
                     final_path.display(),
@@ -147,7 +150,8 @@ impl ModelLoader {
         retry_config: &RetryConfig,
     ) -> Result<LoadedModel, ModelError> {
         // Use the provided retry_config, falling back to the struct's default
-        self.load_model_with_cache(repo, filename, retry_config).await
+        self.load_model_with_cache(repo, filename, retry_config)
+            .await
     }
 
     /// Load a model from HuggingFace using the loader's default retry config
@@ -158,7 +162,8 @@ impl ModelLoader {
     ) -> Result<LoadedModel, ModelError> {
         // Clone the retry config to avoid borrow conflicts
         let retry_config = self.retry_config.clone();
-        self.load_model_with_cache(repo, filename, &retry_config).await
+        self.load_model_with_cache(repo, filename, &retry_config)
+            .await
     }
 
     /// Load a model from local filesystem

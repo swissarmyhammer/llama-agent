@@ -1,4 +1,4 @@
-use llama_loader::{ModelSource};
+use llama_loader::ModelSource;
 
 /// Result of a single text embedding operation
 #[derive(Debug, Clone)]

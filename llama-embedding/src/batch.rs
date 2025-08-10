@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use crate::{EmbeddingError, EmbeddingModel, EmbeddingResult};
 use std::path::Path;
-use crate::{EmbeddingModel, EmbeddingResult, EmbeddingError};
+use std::sync::Arc;
 
 /// Processor for handling batch embedding operations
 pub struct BatchProcessor {
@@ -11,31 +11,34 @@ pub struct BatchProcessor {
 impl BatchProcessor {
     /// Create a new batch processor with the given model and batch size
     pub fn new(model: Arc<EmbeddingModel>, batch_size: usize) -> Self {
-        Self {
-            model,
-            batch_size,
-        }
+        Self { model, batch_size }
     }
 
     /// Process a batch of texts and return embedding results
-    pub async fn process_batch(&mut self, texts: &[String]) -> Result<Vec<EmbeddingResult>, EmbeddingError> {
+    pub async fn process_batch(
+        &mut self,
+        texts: &[String],
+    ) -> Result<Vec<EmbeddingResult>, EmbeddingError> {
         // TODO: Implement batch processing logic
         // This is a placeholder implementation
         let _ = texts;
         Err(EmbeddingError::BatchProcessing(
-            "BatchProcessor::process_batch not yet implemented".to_string()
+            "BatchProcessor::process_batch not yet implemented".to_string(),
         ))
     }
 
     /// Process texts from a file, returning an iterator over results
-    /// 
+    ///
     /// The file should contain one text per line.
-    pub async fn process_file<P: AsRef<Path>>(&mut self, input_path: P) -> Result<Vec<EmbeddingResult>, EmbeddingError> {
+    pub async fn process_file<P: AsRef<Path>>(
+        &mut self,
+        input_path: P,
+    ) -> Result<Vec<EmbeddingResult>, EmbeddingError> {
         // TODO: Implement file processing with streaming support
         // This is a placeholder implementation
         let _ = input_path;
         Err(EmbeddingError::BatchProcessing(
-            "BatchProcessor::process_file not yet implemented".to_string()
+            "BatchProcessor::process_file not yet implemented".to_string(),
         ))
     }
 

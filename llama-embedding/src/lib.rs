@@ -43,7 +43,7 @@ pub mod model;
 pub mod types;
 
 // Re-export public API
-pub use error::{EmbeddingError, EmbeddingResult as Result};
-pub use types::{EmbeddingConfig, EmbeddingResult};
-pub use model::EmbeddingModel;
 pub use batch::BatchProcessor;
+pub use error::{EmbeddingError, EmbeddingResult as Result};
+pub use model::EmbeddingModel;
+pub use types::{EmbeddingConfig, EmbeddingResult};

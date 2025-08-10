@@ -2,7 +2,7 @@ use crate::types::{ModelConfig, ModelError};
 use llama_cpp_2::{
     context::{params::LlamaContextParams, LlamaContext},
     llama_backend::LlamaBackend,
-    model::{LlamaModel},
+    model::LlamaModel,
     send_logs_to_tracing, LogOptions,
 };
 use llama_loader::{ModelLoader, ModelMetadata};
@@ -138,7 +138,11 @@ impl ModelManager {
         // Load model using ModelLoader
         let loaded_model = {
             let mut loader_guard = self.loader.write().await;
-            loader_guard.as_mut().unwrap().load_model(&self.config).await?
+            loader_guard
+                .as_mut()
+                .unwrap()
+                .load_model(&self.config)
+                .await?
         };
 
         let memory_after = Self::get_process_memory_mb().unwrap_or(0);
@@ -152,7 +156,10 @@ impl ModelManager {
 
         info!(
             "Model loaded successfully in {:?} (Memory: +{} MB, Total: {} MB, Cache Hit: {})",
-            loaded_model.metadata.load_time, memory_used, memory_after, loaded_model.metadata.cache_hit
+            loaded_model.metadata.load_time,
+            memory_used,
+            memory_after,
+            loaded_model.metadata.cache_hit
         );
 
         // Store model and metadata
@@ -198,7 +205,6 @@ impl ModelManager {
             .new_context(&self.backend, context_params)
             .map_err(move |e| ModelError::LoadingFailed(format!("Failed to create context: {}", e)))
     }
-
 
     /// Get current process memory usage in MB
     fn get_process_memory_mb() -> Result<u64, std::io::Error> {
