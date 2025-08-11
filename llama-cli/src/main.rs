@@ -27,7 +27,7 @@ pub enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
+    let result = match cli.command {
         Commands::Generate(args) => {
             // Configure logging level based on debug flag
             if args.debug {
@@ -49,35 +49,7 @@ async fn main() -> Result<()> {
             }
 
             // Initialize agent components and process request
-            match run_generate(args).await {
-                Ok(_response) => {
-                    std::process::exit(0);
-                }
-                Err(e) => {
-                    // Check if it's a validation error or runtime error for appropriate exit codes
-                    let error_msg = e.to_string();
-                    if error_msg.contains("does not exist")
-                        || error_msg.contains("Invalid HuggingFace")
-                        || error_msg.contains("Token limit")
-                        || error_msg.contains("cannot be empty")
-                        || error_msg.contains("HuggingFace model repo must be")
-                    {
-                        // Validation error - exit code 2
-                        eprintln!("Error: {}", e);
-                        std::process::exit(2);
-                    } else if error_msg.contains("Failed to load model")
-                        || error_msg.contains("Failed to initialize agent")
-                    {
-                        // Model loading error - exit code 3
-                        eprintln!("Model Error: {}", e);
-                        std::process::exit(3);
-                    } else {
-                        // General runtime error - exit code 1
-                        eprintln!("Runtime Error: {}", e);
-                        std::process::exit(1);
-                    }
-                }
-            }
+            run_generate(args).await.map(|_| ())
         }
         Commands::Embed(args) => {
             // Configure logging level based on debug flag
@@ -99,36 +71,44 @@ async fn main() -> Result<()> {
             }
 
             // Run embed command implementation
-            match llama_cli::embed::run_embed_command(args).await {
-                Ok(_) => {
-                    std::process::exit(0);
-                }
-                Err(e) => {
-                    // Check error type for appropriate exit codes
-                    let error_msg = e.to_string();
-                    if error_msg.contains("does not exist")
-                        || error_msg.contains("Invalid")
-                        || error_msg.contains("cannot be empty")
-                        || error_msg.contains("Batch size")
-                        || error_msg.contains("Max length")
-                    {
-                        // Validation error - exit code 2
-                        eprintln!("Error: {}", e);
-                        std::process::exit(2);
-                    } else if error_msg.contains("Failed to load model")
-                        || error_msg.contains("Failed to initialize")
-                        || error_msg.contains("Model")
-                    {
-                        // Model loading error - exit code 3
-                        eprintln!("Model Error: {}", e);
-                        std::process::exit(3);
-                    } else {
-                        // General runtime error - exit code 1
-                        eprintln!("Runtime Error: {}", e);
-                        std::process::exit(1);
-                    }
-                }
-            }
+            llama_cli::embed::run_embed_command(args).await.map(|_| ())
+        }
+    };
+
+    // Handle errors and set appropriate exit codes after all cleanup has occurred
+    match result {
+        Ok(_) => {
+            // Success - normal exit (code 0)
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            
+            // Check error type for appropriate exit codes
+            let exit_code = if error_msg.contains("does not exist")
+                || error_msg.contains("Invalid HuggingFace")
+                || error_msg.contains("Token limit")
+                || error_msg.contains("cannot be empty")
+                || error_msg.contains("HuggingFace model repo must be")
+                || error_msg.contains("Invalid")
+                || error_msg.contains("Batch size")
+                || error_msg.contains("Max length")
+            {
+                eprintln!("Error: {}", e);
+                2 // Validation error
+            } else if error_msg.contains("Failed to load model")
+                || error_msg.contains("Failed to initialize agent")
+                || error_msg.contains("Failed to initialize")
+                || error_msg.contains("Model loading failed")
+            {
+                eprintln!("Model Error: {}", e);
+                3 // Model loading error
+            } else {
+                eprintln!("Runtime Error: {}", e);
+                1 // General runtime error
+            };
+
+            std::process::exit(exit_code);
         }
     }
 }

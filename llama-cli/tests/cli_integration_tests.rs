@@ -11,7 +11,7 @@ use tracing_subscriber;
 
 // Test data paths
 const SMALL_TEXTS: &str = "tests/data/small_texts.txt";
-const MEDIUM_TEXTS: &str = "tests/data/medium_texts.txt"; 
+const MEDIUM_TEXTS: &str = "tests/data/medium_texts.txt";
 const LARGE_TEXTS: &str = "tests/data/large_texts.txt";
 const MULTILINGUAL: &str = "tests/data/multilingual.txt";
 const EDGE_CASES: &str = "tests/data/edge_cases.txt";
@@ -46,13 +46,18 @@ impl CliTestHelper {
 
     /// Run a CLI command and return the output with timeout
     pub async fn run_cli_command(&self, args: &[&str]) -> Result<CommandOutput> {
-        self.run_cli_command_with_timeout(args, Duration::from_secs(300)).await
+        self.run_cli_command_with_timeout(args, Duration::from_secs(300))
+            .await
     }
 
     /// Run a CLI command with custom timeout
-    pub async fn run_cli_command_with_timeout(&self, args: &[&str], timeout_duration: Duration) -> Result<CommandOutput> {
+    pub async fn run_cli_command_with_timeout(
+        &self,
+        args: &[&str],
+        timeout_duration: Duration,
+    ) -> Result<CommandOutput> {
         let start_time = Instant::now();
-        
+
         let mut cmd = TokioCommand::new("cargo");
         // Change to workspace root (parent of llama-cli)
         cmd.current_dir(&self.workspace_root.parent().unwrap());
@@ -64,25 +69,24 @@ impl CliTestHelper {
         let elapsed = start_time.elapsed();
 
         match result {
-            Ok(Ok(output)) => {
-                Ok(CommandOutput {
-                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                    status_code: output.status.code().unwrap_or(-1),
-                    success: output.status.success(),
-                    elapsed,
-                })
-            }
+            Ok(Ok(output)) => Ok(CommandOutput {
+                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                status_code: output.status.code().unwrap_or(-1),
+                success: output.status.success(),
+                elapsed,
+            }),
             Ok(Err(e)) => Err(e.into()),
-            Err(_) => {
-                Ok(CommandOutput {
-                    stdout: String::new(),
-                    stderr: format!("Command timed out after {:.1}s", timeout_duration.as_secs_f64()),
-                    status_code: -1,
-                    success: false,
-                    elapsed,
-                })
-            }
+            Err(_) => Ok(CommandOutput {
+                stdout: String::new(),
+                stderr: format!(
+                    "Command timed out after {:.1}s",
+                    timeout_duration.as_secs_f64()
+                ),
+                status_code: -1,
+                success: false,
+                elapsed,
+            }),
         }
     }
 
@@ -93,11 +97,7 @@ impl CliTestHelper {
         prompt: &str,
         options: &GenerateOptions,
     ) -> Result<CommandOutput> {
-        let mut args = vec![
-            "generate",
-            "--model", model,
-            "--prompt", prompt,
-        ];
+        let mut args = vec!["generate", "--model", model, "--prompt", prompt];
 
         // Store string conversions to extend their lifetime
         let limit_str = options.limit.map(|l| l.to_string());
@@ -133,9 +133,12 @@ impl CliTestHelper {
     ) -> Result<CommandOutput> {
         let mut args = vec![
             "embed",
-            "--model", model,
-            "--input", input_path.to_str().unwrap(),
-            "--output", output_path.to_str().unwrap(),
+            "--model",
+            model,
+            "--input",
+            input_path.to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
         ];
 
         // Store string conversions to extend their lifetime
@@ -162,16 +165,23 @@ impl CliTestHelper {
     }
 
     /// Validate that Parquet file exists and has expected structure
-    pub fn validate_parquet_file(&self, path: &Path, expected_records: usize) -> Result<ParquetValidation> {
+    pub fn validate_parquet_file(
+        &self,
+        path: &Path,
+        expected_records: usize,
+    ) -> Result<ParquetValidation> {
         use std::fs::metadata;
 
         // Check file exists
         if !path.exists() {
-            return Err(anyhow::anyhow!("Parquet file does not exist: {}", path.display()));
+            return Err(anyhow::anyhow!(
+                "Parquet file does not exist: {}",
+                path.display()
+            ));
         }
 
         let file_size = metadata(path)?.len();
-        
+
         // For now, basic validation - could be enhanced with actual Parquet reading
         Ok(ParquetValidation {
             file_exists: true,
@@ -231,10 +241,12 @@ async fn test_timeout_functionality() -> Result<()> {
     let helper = CliTestHelper::new();
 
     info!("Testing timeout functionality with short timeout");
-    
+
     // Test with very short timeout to ensure timeout mechanism works
-    let result = helper.run_cli_command_with_timeout(&["--help"], Duration::from_millis(1)).await?;
-    
+    let result = helper
+        .run_cli_command_with_timeout(&["--help"], Duration::from_millis(1))
+        .await?;
+
     // Should timeout (unless --help is extremely fast)
     if !result.success && result.stderr.contains("timed out") {
         info!("Timeout mechanism working correctly");
@@ -242,7 +254,7 @@ async fn test_timeout_functionality() -> Result<()> {
         // --help was fast enough, which is also valid
         info!("Help command was faster than timeout, which is valid");
     }
-    
+
     Ok(())
 }
 
@@ -264,11 +276,9 @@ async fn test_generate_command_compatibility() -> Result<()> {
         ..Default::default()
     };
 
-    let result = helper.run_generate_command(
-        QWEN_GENERATION_MODEL,
-        "What is an apple?",
-        &options,
-    ).await?;
+    let result = helper
+        .run_generate_command(QWEN_GENERATION_MODEL, "What is an apple?", &options)
+        .await?;
 
     // Should succeed (or fail gracefully with model loading issues, not argument parsing)
     if !result.success {
@@ -278,17 +288,23 @@ async fn test_generate_command_compatibility() -> Result<()> {
             return Ok(());
         }
         assert!(
-            result.stderr.contains("Model") ||
-            result.stderr.contains("Failed to load") ||
-            result.stderr.contains("Backend") ||
-            !result.stderr.contains("argument") && !result.stderr.contains("Usage"),
+            result.stderr.contains("Model")
+                || result.stderr.contains("Failed to load")
+                || result.stderr.contains("Backend")
+                || !result.stderr.contains("argument") && !result.stderr.contains("Usage"),
             "Generate command failed due to argument parsing, not model loading: {}",
             result.stderr
         );
     } else {
         // If successful, validate output
-        assert!(!result.stdout.trim().is_empty(), "Generate command should produce output");
-        assert!(result.stdout.len() > 10, "Generated text should be substantial");
+        assert!(
+            !result.stdout.trim().is_empty(),
+            "Generate command should produce output"
+        );
+        assert!(
+            result.stdout.len() > 10,
+            "Generated text should be substantial"
+        );
     }
 
     Ok(())
@@ -304,23 +320,49 @@ async fn test_generate_unchanged_behavior() -> Result<()> {
     // Test various parameter combinations that should work identically to before
     let test_cases = vec![
         (GenerateOptions::default(), "Hello"),
-        (GenerateOptions { limit: Some(32), ..Default::default() }, "Tell me about AI"),
-        (GenerateOptions { temperature: Some(0.5), top_p: Some(0.8), ..Default::default() }, "Explain quantum computing"),
-        (GenerateOptions { debug: true, ..Default::default() }, "Short prompt"),
+        (
+            GenerateOptions {
+                limit: Some(32),
+                ..Default::default()
+            },
+            "Tell me about AI",
+        ),
+        (
+            GenerateOptions {
+                temperature: Some(0.5),
+                top_p: Some(0.8),
+                ..Default::default()
+            },
+            "Explain quantum computing",
+        ),
+        (
+            GenerateOptions {
+                debug: true,
+                ..Default::default()
+            },
+            "Short prompt",
+        ),
     ];
 
     for (options, prompt) in test_cases {
-        let result = helper.run_generate_command(QWEN_GENERATION_MODEL, prompt, &options).await?;
-        
+        let result = helper
+            .run_generate_command(QWEN_GENERATION_MODEL, prompt, &options)
+            .await?;
+
         // Skip timeouts - focus on argument parsing
         if !result.success && result.stderr.contains("timed out") {
             info!("Skipping test case due to timeout: {}", prompt);
             continue;
         }
-        
+
         // Focus on argument parsing - all should parse correctly
-        if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Usage")) {
-            panic!("Generate command argument parsing changed: {}", result.stderr);
+        if !result.success
+            && (result.stderr.contains("argument") || result.stderr.contains("Usage"))
+        {
+            panic!(
+                "Generate command argument parsing changed: {}",
+                result.stderr
+            );
         }
     }
 
@@ -328,7 +370,7 @@ async fn test_generate_unchanged_behavior() -> Result<()> {
 }
 
 // ==============================================================================
-// Embed Command Basic Functionality Tests  
+// Embed Command Basic Functionality Tests
 // ==============================================================================
 
 #[test]
@@ -347,18 +389,21 @@ async fn test_embed_command_basic_functionality() -> Result<()> {
         ..Default::default()
     };
 
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+        .await?;
 
     // Validate command execution
     if !result.success {
         // Check if failure is due to model loading vs other issues
-        if result.stderr.contains("Model") || result.stderr.contains("Failed to load") || result.stderr.contains("Backend") {
-            info!("Embed test skipped due to model loading issues: {}", result.stderr);
+        if result.stderr.contains("Model")
+            || result.stderr.contains("Failed to load")
+            || result.stderr.contains("Backend")
+        {
+            info!(
+                "Embed test skipped due to model loading issues: {}",
+                result.stderr
+            );
             return Ok(()); // Skip test if model loading fails
         } else {
             panic!("Embed command failed unexpectedly: {}", result.stderr);
@@ -368,12 +413,15 @@ async fn test_embed_command_basic_functionality() -> Result<()> {
     // If successful, validate output
     let validation = helper.validate_parquet_file(&output_path, 10)?;
     assert!(validation.file_exists, "Parquet output file should exist");
-    assert!(validation.file_size_bytes > 0, "Parquet file should not be empty");
+    assert!(
+        validation.file_size_bytes > 0,
+        "Parquet file should not be empty"
+    );
 
     Ok(())
 }
 
-#[test]  
+#[test]
 async fn test_embed_with_qwen_model() -> Result<()> {
     init_logging();
     let helper = CliTestHelper::new();
@@ -391,26 +439,35 @@ async fn test_embed_with_qwen_model() -> Result<()> {
         ..Default::default()
     };
 
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,  
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+        .await?;
 
     if !result.success {
         if result.stderr.contains("Model") || result.stderr.contains("Failed to load") {
-            info!("Qwen embed test skipped due to model loading: {}", result.stderr);
+            info!(
+                "Qwen embed test skipped due to model loading: {}",
+                result.stderr
+            );
             return Ok(());
         } else {
             panic!("Qwen embed test failed: {}", result.stderr);
         }
     }
 
-    // Validate console output format  
-    assert!(result.stdout.contains("Loading model"), "Should show model loading message");
-    assert!(result.stdout.contains("dimensions"), "Should show embedding dimensions");
-    assert!(result.stdout.contains("Processing complete"), "Should show completion message");
+    // Validate console output format
+    assert!(
+        result.stdout.contains("Loading model"),
+        "Should show model loading message"
+    );
+    assert!(
+        result.stdout.contains("dimensions"),
+        "Should show embedding dimensions"
+    );
+    assert!(
+        result.stdout.contains("Processing complete"),
+        "Should show completion message"
+    );
 
     Ok(())
 }
@@ -431,21 +488,21 @@ async fn test_embed_output_validation() -> Result<()> {
         ..Default::default()
     };
 
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+        .await?;
 
     if result.success {
         // Detailed output validation
         let validation = helper.validate_parquet_file(&output_path, 10)?;
         assert!(validation.file_exists);
-        
+
         // File should have reasonable size (embeddings + metadata)
-        assert!(validation.file_size_bytes > 1024, "Parquet file should be substantial");
-        
+        assert!(
+            validation.file_size_bytes > 1024,
+            "Parquet file should be substantial"
+        );
+
         info!("Embed output validation completed successfully");
     } else if result.stderr.contains("Model") {
         info!("Output validation test skipped due to model loading");
@@ -474,27 +531,27 @@ async fn test_both_commands_same_session() -> Result<()> {
         ..Default::default()
     };
 
-    let gen_result = helper.run_generate_command(
-        QWEN_GENERATION_MODEL,
-        "Test prompt",
-        &gen_options,
-    ).await?;
+    let gen_result = helper
+        .run_generate_command(QWEN_GENERATION_MODEL, "Test prompt", &gen_options)
+        .await?;
 
     // Then test embed command
     let input_path = helper.workspace_root.join(SMALL_TEXTS);
     let output_path = temp_dir.path().join("session_embeddings.parquet");
-    
+
     let embed_options = EmbedOptions {
         batch_size: Some(4),
         ..Default::default()
     };
 
-    let embed_result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &embed_options,
-    ).await?;
+    let embed_result = helper
+        .run_embed_command(
+            QWEN_EMBEDDING_MODEL,
+            &input_path,
+            &output_path,
+            &embed_options,
+        )
+        .await?;
 
     // Skip if timeouts occurred
     if !gen_result.success && gen_result.stderr.contains("timed out") {
@@ -507,19 +564,29 @@ async fn test_both_commands_same_session() -> Result<()> {
     }
 
     // Both commands should parse arguments correctly even if they fail on model loading
-    if !gen_result.success && (gen_result.stderr.contains("argument") || gen_result.stderr.contains("Usage")) {
-        panic!("Generate command argument parsing failed: {}", gen_result.stderr);
+    if !gen_result.success
+        && (gen_result.stderr.contains("argument") || gen_result.stderr.contains("Usage"))
+    {
+        panic!(
+            "Generate command argument parsing failed: {}",
+            gen_result.stderr
+        );
     }
 
-    if !embed_result.success && (embed_result.stderr.contains("argument") || embed_result.stderr.contains("Usage")) {
-        panic!("Embed command argument parsing failed: {}", embed_result.stderr);
+    if !embed_result.success
+        && (embed_result.stderr.contains("argument") || embed_result.stderr.contains("Usage"))
+    {
+        panic!(
+            "Embed command argument parsing failed: {}",
+            embed_result.stderr
+        );
     }
 
     info!("Both commands parsed arguments correctly");
     Ok(())
 }
 
-#[test] 
+#[test]
 async fn test_cache_sharing() -> Result<()> {
     init_logging();
     let helper = CliTestHelper::new();
@@ -541,20 +608,14 @@ async fn test_cache_sharing() -> Result<()> {
     };
 
     // First run
-    let result1 = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output1_path,
-        &options,
-    ).await?;
+    let result1 = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output1_path, &options)
+        .await?;
 
     // Second run with same model
-    let result2 = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output2_path,
-        &options,
-    ).await?;
+    let result2 = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output2_path, &options)
+        .await?;
 
     // If both succeed, second should be faster (cached)
     if result1.success && result2.success {
@@ -577,26 +638,37 @@ async fn test_no_interference() -> Result<()> {
     info!("Testing that commands don't interfere with each other");
 
     // Run commands with different configurations to ensure no interference
-    let gen_result = helper.run_generate_command(
-        QWEN_GENERATION_MODEL,
-        "Generation test",
-        &GenerateOptions { debug: true, ..Default::default() },
-    ).await?;
+    let gen_result = helper
+        .run_generate_command(
+            QWEN_GENERATION_MODEL,
+            "Generation test",
+            &GenerateOptions {
+                debug: true,
+                ..Default::default()
+            },
+        )
+        .await?;
 
     let temp_dir = TempDir::new()?;
     let input_path = helper.workspace_root.join(SMALL_TEXTS);
     let output_path = temp_dir.path().join("no_interference.parquet");
 
-    let embed_result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &EmbedOptions { debug: false, ..Default::default() },
-    ).await?;
+    let embed_result = helper
+        .run_embed_command(
+            QWEN_EMBEDDING_MODEL,
+            &input_path,
+            &output_path,
+            &EmbedOptions {
+                debug: false,
+                ..Default::default()
+            },
+        )
+        .await?;
 
     // Skip if timeouts occurred
-    if (!gen_result.success && gen_result.stderr.contains("timed out")) ||
-       (!embed_result.success && embed_result.stderr.contains("timed out")) {
+    if (!gen_result.success && gen_result.stderr.contains("timed out"))
+        || (!embed_result.success && embed_result.stderr.contains("timed out"))
+    {
         info!("No interference test skipped due to timeouts");
         return Ok(());
     }
@@ -626,23 +698,27 @@ async fn test_various_batch_sizes() -> Result<()> {
     let batch_sizes = vec![1, 8, 32, 64];
 
     for batch_size in batch_sizes {
-        let output_path = temp_dir.path().join(format!("batch_{}.parquet", batch_size));
-        
+        let output_path = temp_dir
+            .path()
+            .join(format!("batch_{}.parquet", batch_size));
+
         let options = EmbedOptions {
             batch_size: Some(batch_size),
             ..Default::default()
         };
 
-        let result = helper.run_embed_command(
-            QWEN_EMBEDDING_MODEL,
-            &input_path,
-            &output_path,
-            &options,
-        ).await?;
+        let result = helper
+            .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+            .await?;
 
         // Should parse arguments correctly regardless of model loading success
-        if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Batch size")) {
-            panic!("Batch size {} failed argument validation: {}", batch_size, result.stderr);
+        if !result.success
+            && (result.stderr.contains("argument") || result.stderr.contains("Batch size"))
+        {
+            panic!(
+                "Batch size {} failed argument validation: {}",
+                batch_size, result.stderr
+            );
         }
 
         info!("Batch size {} tested successfully", batch_size);
@@ -660,27 +736,29 @@ async fn test_normalization_options() -> Result<()> {
     info!("Testing normalization options");
 
     let input_path = helper.workspace_root.join(SMALL_TEXTS);
-    
+
     // Test with and without normalization
     for normalize in [true, false] {
         let output_path = temp_dir.path().join(format!("norm_{}.parquet", normalize));
-        
+
         let options = EmbedOptions {
             normalize,
             batch_size: Some(4),
             ..Default::default()
         };
 
-        let result = helper.run_embed_command(
-            QWEN_EMBEDDING_MODEL,
-            &input_path,
-            &output_path,
-            &options,
-        ).await?;
+        let result = helper
+            .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+            .await?;
 
         // Arguments should parse correctly
-        if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Usage")) {
-            panic!("Normalization option {} failed parsing: {}", normalize, result.stderr);
+        if !result.success
+            && (result.stderr.contains("argument") || result.stderr.contains("Usage"))
+        {
+            panic!(
+                "Normalization option {} failed parsing: {}",
+                normalize, result.stderr
+            );
         }
 
         info!("Normalization {} tested successfully", normalize);
@@ -701,24 +779,28 @@ async fn test_sequence_length_limits() -> Result<()> {
     let max_lengths = vec![128, 256, 512, 1024];
 
     for max_length in max_lengths {
-        let output_path = temp_dir.path().join(format!("maxlen_{}.parquet", max_length));
-        
+        let output_path = temp_dir
+            .path()
+            .join(format!("maxlen_{}.parquet", max_length));
+
         let options = EmbedOptions {
             max_length: Some(max_length),
             batch_size: Some(4),
             ..Default::default()
         };
 
-        let result = helper.run_embed_command(
-            QWEN_EMBEDDING_MODEL,
-            &input_path,
-            &output_path,
-            &options,
-        ).await?;
+        let result = helper
+            .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+            .await?;
 
         // Should parse arguments correctly
-        if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Max length")) {
-            panic!("Max length {} failed validation: {}", max_length, result.stderr);
+        if !result.success
+            && (result.stderr.contains("argument") || result.stderr.contains("Max length"))
+        {
+            panic!(
+                "Max length {} failed validation: {}",
+                max_length, result.stderr
+            );
         }
 
         info!("Max length {} tested successfully", max_length);
@@ -744,12 +826,9 @@ async fn test_debug_mode() -> Result<()> {
         ..Default::default()
     };
 
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+        .await?;
 
     // Debug mode should not cause parsing errors
     if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Usage")) {
@@ -770,7 +849,7 @@ async fn test_debug_mode() -> Result<()> {
 }
 
 // ==============================================================================
-// File Size and Scaling Tests  
+// File Size and Scaling Tests
 // ==============================================================================
 
 #[test]
@@ -796,21 +875,27 @@ async fn test_small_medium_large_inputs() -> Result<()> {
             ..Default::default()
         };
 
-        let result = helper.run_embed_command(
-            QWEN_EMBEDDING_MODEL,
-            &input_path,
-            &output_path,
-            &options,
-        ).await?;
+        let result = helper
+            .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+            .await?;
 
         // Arguments should parse correctly regardless of file size
-        if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Usage")) {
-            panic!("File size test {} failed argument parsing: {}", name, result.stderr);
+        if !result.success
+            && (result.stderr.contains("argument") || result.stderr.contains("Usage"))
+        {
+            panic!(
+                "File size test {} failed argument parsing: {}",
+                name, result.stderr
+            );
         }
 
         if result.success {
             let validation = helper.validate_parquet_file(&output_path, expected_count)?;
-            assert!(validation.file_exists, "Output file should exist for {}", name);
+            assert!(
+                validation.file_exists,
+                "Output file should exist for {}",
+                name
+            );
         }
 
         info!("File size test {} completed successfully", name);
@@ -835,16 +920,16 @@ async fn test_unicode_multilingual() -> Result<()> {
         ..Default::default()
     };
 
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+        .await?;
 
     // Should handle Unicode text without parsing errors
     if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Usage")) {
-        panic!("Multilingual test failed argument parsing: {}", result.stderr);
+        panic!(
+            "Multilingual test failed argument parsing: {}",
+            result.stderr
+        );
     }
 
     if result.success {
@@ -872,12 +957,9 @@ async fn test_edge_cases() -> Result<()> {
         ..Default::default()
     };
 
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+        .await?;
 
     // Should handle edge cases gracefully
     if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Usage")) {
@@ -905,12 +987,9 @@ async fn test_missing_files() -> Result<()> {
 
     let options = EmbedOptions::default();
 
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &missing_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &missing_path, &output_path, &options)
+        .await?;
 
     // Should fail with appropriate error message
     assert!(!result.success, "Should fail with missing input file");
@@ -937,18 +1016,23 @@ async fn test_invalid_models() -> Result<()> {
 
     let options = EmbedOptions::default();
 
-    let result = helper.run_embed_command(
-        "invalid/nonexistent-model",
-        &input_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(
+            "invalid/nonexistent-model",
+            &input_path,
+            &output_path,
+            &options,
+        )
+        .await?;
 
     // Should fail with model-related error, not argument parsing error
     assert!(!result.success, "Should fail with invalid model");
-    
+
     if result.stderr.contains("argument") || result.stderr.contains("Usage") {
-        panic!("Invalid model test failed due to argument parsing: {}", result.stderr);
+        panic!(
+            "Invalid model test failed due to argument parsing: {}",
+            result.stderr
+        );
     }
 
     info!("Invalid models test completed successfully");
@@ -971,16 +1055,16 @@ async fn test_malformed_inputs() -> Result<()> {
         ..Default::default()
     };
 
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+        .await?;
 
     // Should not fail due to argument parsing
     if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Usage")) {
-        panic!("Malformed input test failed argument parsing: {}", result.stderr);
+        panic!(
+            "Malformed input test failed argument parsing: {}",
+            result.stderr
+        );
     }
 
     // Should either succeed with cleaned data or fail gracefully
@@ -1000,16 +1084,16 @@ async fn test_insufficient_permissions() -> Result<()> {
 
     let options = EmbedOptions::default();
 
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+        .await?;
 
     // Should fail, but not due to argument parsing
     if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Usage")) {
-        panic!("Permissions test failed argument parsing: {}", result.stderr);
+        panic!(
+            "Permissions test failed argument parsing: {}",
+            result.stderr
+        );
     }
 
     info!("Insufficient permissions test completed");
@@ -1017,7 +1101,7 @@ async fn test_insufficient_permissions() -> Result<()> {
 }
 
 // ==============================================================================
-// Performance Tests  
+// Performance Tests
 // ==============================================================================
 
 #[test]
@@ -1037,12 +1121,9 @@ async fn test_performance_requirements() -> Result<()> {
     };
 
     let start_time = Instant::now();
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+        .await?;
     let total_time = start_time.elapsed();
 
     if result.success {
@@ -1053,7 +1134,7 @@ async fn test_performance_requirements() -> Result<()> {
         } else {
             60 // Subsequent runs with cached model
         };
-        
+
         assert!(
             total_time < Duration::from_secs(max_time_secs),
             "Processing 1000 texts should take less than {}s, took {:.1}s (likely first run with model download)",
@@ -1062,9 +1143,15 @@ async fn test_performance_requirements() -> Result<()> {
         );
 
         let validation = helper.validate_parquet_file(&output_path, 1000)?;
-        assert!(validation.file_exists, "Performance test output should exist");
+        assert!(
+            validation.file_exists,
+            "Performance test output should exist"
+        );
 
-        info!("Performance test passed: {:.1}s for 1000 texts", total_time.as_secs_f64());
+        info!(
+            "Performance test passed: {:.1}s for 1000 texts",
+            total_time.as_secs_f64()
+        );
     } else if result.stderr.contains("Model") {
         info!("Performance test skipped due to model loading issues");
     } else {
@@ -1083,28 +1170,32 @@ async fn test_memory_scaling() -> Result<()> {
     info!("Testing memory usage scaling");
 
     let input_path = helper.workspace_root.join(LARGE_TEXTS);
-    
+
     // Test different batch sizes to observe memory scaling
     let batch_sizes = vec![8, 16, 32, 64];
 
     for batch_size in batch_sizes {
-        let output_path = temp_dir.path().join(format!("memory_test_{}.parquet", batch_size));
-        
+        let output_path = temp_dir
+            .path()
+            .join(format!("memory_test_{}.parquet", batch_size));
+
         let options = EmbedOptions {
             batch_size: Some(batch_size),
             ..Default::default()
         };
 
-        let result = helper.run_embed_command(
-            QWEN_EMBEDDING_MODEL,
-            &input_path,
-            &output_path,
-            &options,
-        ).await?;
+        let result = helper
+            .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+            .await?;
 
         // Should handle different batch sizes without parsing errors
-        if !result.success && (result.stderr.contains("argument") || result.stderr.contains("Usage")) {
-            panic!("Memory scaling test batch_size {} failed parsing: {}", batch_size, result.stderr);
+        if !result.success
+            && (result.stderr.contains("argument") || result.stderr.contains("Usage"))
+        {
+            panic!(
+                "Memory scaling test batch_size {} failed parsing: {}",
+                batch_size, result.stderr
+            );
         }
 
         info!("Memory scaling test batch_size {} completed", batch_size);
@@ -1130,12 +1221,9 @@ async fn test_throughput_measurement() -> Result<()> {
         ..Default::default()
     };
 
-    let result = helper.run_embed_command(
-        QWEN_EMBEDDING_MODEL,
-        &input_path,
-        &output_path,
-        &options,
-    ).await?;
+    let result = helper
+        .run_embed_command(QWEN_EMBEDDING_MODEL, &input_path, &output_path, &options)
+        .await?;
 
     if result.success {
         // Should report throughput metrics
@@ -1143,7 +1231,7 @@ async fn test_throughput_measurement() -> Result<()> {
             result.stdout.contains("texts/s") || result.stdout.contains("throughput"),
             "Should report throughput metrics in output"
         );
-        
+
         assert!(
             result.stdout.contains("Processing complete"),
             "Should report completion status"

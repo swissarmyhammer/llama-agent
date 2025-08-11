@@ -168,7 +168,7 @@ async fn demonstrate_batch_processing() -> Result<(), Box<dyn std::error::Error>
     println!("  - Best throughput");
 
     // Simulate batch processing performance
-    let requests = vec![
+    let requests = [
         "Explain machine learning",
         "What is Rust programming?",
         "Describe neural networks",
@@ -453,7 +453,7 @@ async fn benchmark_real_performance(
             });
 
             let request = GenerationRequest {
-                session_id: session.id.clone(),
+                session_id: session.id,
                 max_tokens: Some(100),
                 temperature: Some(0.7),
                 top_p: Some(0.9),

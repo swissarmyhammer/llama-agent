@@ -241,7 +241,7 @@ async fn demonstrate_generation_errors() -> Result<(), Box<dyn std::error::Error
             });
 
             let request = GenerationRequest {
-                session_id: session.id.clone(),
+                session_id: session.id,
                 max_tokens: Some(10000), // Very large token limit
                 temperature: Some(2.0),  // Extreme temperature
                 top_p: Some(1.0),

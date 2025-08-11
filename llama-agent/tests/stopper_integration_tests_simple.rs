@@ -36,7 +36,7 @@ async fn test_stopper_implementations_with_real_model() -> Result<(), Box<dyn st
 
     // Download and load model
     let model_repo = "unsloth/Qwen3-0.6B-GGUF";
-    let model_filename = "qwen3-0.6b-q4_k_m.gguf"; // Using Q4_K_M quantization for good balance
+    let model_filename = "Qwen3-0.6B-Q4_K_M.gguf"; // Using Q4_K_M quantization for good balance
 
     info!("Downloading model {} from {}", model_filename, model_repo);
 
@@ -52,7 +52,7 @@ async fn test_stopper_implementations_with_real_model() -> Result<(), Box<dyn st
                 model_filename, e
             );
             // Fallback to the smallest available model
-            let fallback_filename = "qwen3-0.6b-q8_0.gguf";
+            let fallback_filename = "Qwen3-0.6B-Q8_0.gguf";
             match repo.get(fallback_filename).await {
                 Ok(path) => {
                     info!(
@@ -488,7 +488,7 @@ async fn test_comprehensive_edge_cases() -> Result<(), Box<dyn std::error::Error
     let repo = api.model("unsloth/Qwen3-0.6B-GGUF".to_string());
 
     // Use a very small model for edge case testing
-    let model_path = match repo.get("qwen3-0.6b-q8_0.gguf").await {
+    let model_path = match repo.get("Qwen3-0.6B-Q8_0.gguf").await {
         Ok(path) => path,
         Err(_) => {
             info!("Model not available for edge case testing, using basic interface tests");

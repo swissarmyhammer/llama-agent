@@ -374,7 +374,7 @@ async fn test_timeout_scenarios() {
 
             let session = TestHelper::sample_session();
             let request = GenerationRequest {
-                session_id: session.id.clone(),
+                session_id: session.id,
                 max_tokens: Some(100),
                 temperature: Some(0.7),
                 top_p: Some(0.9),
