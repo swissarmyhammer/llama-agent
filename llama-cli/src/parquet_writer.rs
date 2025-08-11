@@ -237,11 +237,8 @@ impl ParquetWriter {
             let embedding_series = Series::new("", &result.embedding);
             embedding_series_builder.push(embedding_series);
         }
-        
-        let embedding_series = Series::new(
-            "embedding",
-            embedding_series_builder
-        );
+
+        let embedding_series = Series::new("embedding", embedding_series_builder);
 
         // Create the main DataFrame with embedding as a single array column
         let df = DataFrame::new(vec![

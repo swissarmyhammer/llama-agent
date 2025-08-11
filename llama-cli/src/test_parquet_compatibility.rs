@@ -53,7 +53,10 @@ mod parquet_compatibility_tests {
             &DataType::UInt64
         );
         // Verify embedding is a List of Float32
-        assert!(matches!(df.column("embedding").unwrap().dtype(), DataType::List(_)));
+        assert!(matches!(
+            df.column("embedding").unwrap().dtype(),
+            DataType::List(_)
+        ));
 
         // Verify specific data values
         let texts = df.column("text").unwrap().str().unwrap();
@@ -64,7 +67,7 @@ mod parquet_compatibility_tests {
         // Verify embedding arrays
         let embedding_col = df.column("embedding").unwrap();
         let list_array = embedding_col.list().unwrap();
-        
+
         // Check first embedding vector
         if let Some(first_embedding_series) = list_array.get_as_series(0) {
             let first_vec = first_embedding_series.f32().unwrap();
@@ -162,21 +165,13 @@ mod parquet_compatibility_tests {
         // Test basic aggregations work (count only, as list aggregations are more complex)
         let stats = LazyFrame::scan_parquet(&temp_path, ScanArgsParquet::default())
             .unwrap()
-            .select([
-                len().alias("total_count"),
-            ])
+            .select([len().alias("total_count")])
             .collect()
             .unwrap();
 
         assert_eq!(stats.height(), 1);
         // The len() function creates a column with name "len" by default
-        let count = stats
-            .column("len")
-            .unwrap()
-            .u32()
-            .unwrap()
-            .get(0)
-            .unwrap();
+        let count = stats.column("len").unwrap().u32().unwrap().get(0).unwrap();
         assert_eq!(count, 500);
     }
 }
