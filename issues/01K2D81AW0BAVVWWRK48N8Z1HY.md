@@ -1,1 +1,0 @@
-The embeddings parquet needs one column for embeddings that is a fixed size float array, not a column per embedding dimension.

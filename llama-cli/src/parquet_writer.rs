@@ -230,28 +230,24 @@ impl ParquetWriter {
         let sequence_lengths: Vec<u32> = results.iter().map(|r| r.sequence_length as u32).collect();
         let processing_times: Vec<u64> = results.iter().map(|r| r.processing_time_ms).collect();
 
-        // Note: We'll add embeddings as separate columns below
+        // Create embedding arrays as a List column
+        // Convert Vec<Vec<f32>> to a List Series by creating sub-series
+        let mut embedding_series_builder = Vec::new();
+        for result in results {
+            let embedding_series = Series::new("", &result.embedding);
+            embedding_series_builder.push(embedding_series);
+        }
 
-        // Create the main DataFrame
-        let mut df = DataFrame::new(vec![
+        let embedding_series = Series::new("embedding", embedding_series_builder);
+
+        // Create the main DataFrame with embedding as a single array column
+        let df = DataFrame::new(vec![
             Series::new("text", texts),
             Series::new("text_hash", text_hashes),
             Series::new("sequence_length", sequence_lengths),
             Series::new("processing_time_ms", processing_times),
+            embedding_series,
         ])?;
-
-        // Add embeddings as a struct column with fixed fields
-        let embedding_cols: Vec<Series> = (0..self.embedding_dim)
-            .map(|i| {
-                let values: Vec<f32> = results.iter().map(|r| r.embedding[i]).collect();
-                Series::new(&format!("emb_{}", i), values)
-            })
-            .collect();
-
-        // Add each embedding dimension as a separate column
-        for col in embedding_cols {
-            df = df.lazy().with_column(col.lit()).collect()?;
-        }
 
         debug!(
             "DataFrame created: {} rows, {} columns",
@@ -409,7 +405,6 @@ mod tests {
         assert!(df.get_column_names().contains(&"text_hash"));
         assert!(df.get_column_names().contains(&"sequence_length"));
         assert!(df.get_column_names().contains(&"processing_time_ms"));
-        assert!(df.get_column_names().contains(&"emb_0"));
-        assert!(df.get_column_names().contains(&"emb_1"));
+        assert!(df.get_column_names().contains(&"embedding"));
     }
 }

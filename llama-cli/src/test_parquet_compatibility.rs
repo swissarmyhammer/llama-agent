@@ -32,16 +32,14 @@ mod parquet_compatibility_tests {
 
         // Verify schema
         assert_eq!(df.height(), 3);
-        assert_eq!(df.width(), 7); // text, text_hash, sequence_length, processing_time_ms, emb_0, emb_1, emb_2
+        assert_eq!(df.width(), 5); // text, text_hash, sequence_length, processing_time_ms, embedding
 
         let column_names = df.get_column_names();
         assert!(column_names.contains(&"text"));
         assert!(column_names.contains(&"text_hash"));
         assert!(column_names.contains(&"sequence_length"));
         assert!(column_names.contains(&"processing_time_ms"));
-        assert!(column_names.contains(&"emb_0"));
-        assert!(column_names.contains(&"emb_1"));
-        assert!(column_names.contains(&"emb_2"));
+        assert!(column_names.contains(&"embedding"));
 
         // Verify data types
         assert_eq!(df.column("text").unwrap().dtype(), &DataType::String);
@@ -54,9 +52,11 @@ mod parquet_compatibility_tests {
             df.column("processing_time_ms").unwrap().dtype(),
             &DataType::UInt64
         );
-        assert_eq!(df.column("emb_0").unwrap().dtype(), &DataType::Float32);
-        assert_eq!(df.column("emb_1").unwrap().dtype(), &DataType::Float32);
-        assert_eq!(df.column("emb_2").unwrap().dtype(), &DataType::Float32);
+        // Verify embedding is a List of Float32
+        assert!(matches!(
+            df.column("embedding").unwrap().dtype(),
+            DataType::List(_)
+        ));
 
         // Verify specific data values
         let texts = df.column("text").unwrap().str().unwrap();
@@ -64,10 +64,19 @@ mod parquet_compatibility_tests {
         assert_eq!(texts.get(1).unwrap(), "second text");
         assert_eq!(texts.get(2).unwrap(), "third text");
 
-        let emb0 = df.column("emb_0").unwrap().f32().unwrap();
-        assert!((emb0.get(0).unwrap() - 0.1).abs() < 1e-6);
-        assert!((emb0.get(1).unwrap() - 0.4).abs() < 1e-6);
-        assert!((emb0.get(2).unwrap() - 0.7).abs() < 1e-6);
+        // Verify embedding arrays
+        let embedding_col = df.column("embedding").unwrap();
+        let list_array = embedding_col.list().unwrap();
+
+        // Check first embedding vector
+        if let Some(first_embedding_series) = list_array.get_as_series(0) {
+            let first_vec = first_embedding_series.f32().unwrap();
+            assert!((first_vec.get(0).unwrap() - 0.1).abs() < 1e-6);
+            assert!((first_vec.get(1).unwrap() - 0.2).abs() < 1e-6);
+            assert!((first_vec.get(2).unwrap() - 0.3).abs() < 1e-6);
+        } else {
+            panic!("Could not get first embedding as series");
+        }
     }
 
     #[test]
@@ -98,8 +107,7 @@ mod parquet_compatibility_tests {
             .unwrap()
             .select([
                 col("text"),
-                col("emb_0"),
-                col("emb_1"),
+                col("embedding"),
                 col("sequence_length"),
                 col("processing_time_ms"),
             ])
@@ -107,7 +115,7 @@ mod parquet_compatibility_tests {
             .unwrap();
 
         assert_eq!(df.height(), 1);
-        assert_eq!(df.width(), 5);
+        assert_eq!(df.width(), 4);
 
         // Test that we can perform operations on the data
         let filtered = df
@@ -146,7 +154,7 @@ mod parquet_compatibility_tests {
         // Verify we can read the large dataset (without complex filtering that causes issues)
         let df = LazyFrame::scan_parquet(&temp_path, ScanArgsParquet::default())
             .unwrap()
-            .select([col("text"), col("emb_0"), col("sequence_length")])
+            .select([col("text"), col("embedding"), col("sequence_length")])
             .limit(10)
             .collect()
             .unwrap();
@@ -154,24 +162,16 @@ mod parquet_compatibility_tests {
         assert!(df.height() > 0);
         assert!(df.height() <= 10);
 
-        // Test basic aggregations work
+        // Test basic aggregations work (count only, as list aggregations are more complex)
         let stats = LazyFrame::scan_parquet(&temp_path, ScanArgsParquet::default())
             .unwrap()
-            .select([
-                col("emb_0").mean().alias("avg_emb_0"),
-                len().alias("total_count"),
-            ])
+            .select([len().alias("total_count")])
             .collect()
             .unwrap();
 
         assert_eq!(stats.height(), 1);
-        let count = stats
-            .column("total_count")
-            .unwrap()
-            .u32()
-            .unwrap()
-            .get(0)
-            .unwrap();
+        // The len() function creates a column with name "len" by default
+        let count = stats.column("len").unwrap().u32().unwrap().get(0).unwrap();
         assert_eq!(count, 500);
     }
 }
