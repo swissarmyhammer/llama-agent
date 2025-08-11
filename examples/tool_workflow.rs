@@ -27,8 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AgentConfig {
         model: ModelConfig {
             source: ModelSource::HuggingFace {
-                repo: "microsoft/DialoGPT-medium".to_string(),
-                filename: None,
+                repo: "microsoft/Phi-3-mini-4k-instruct-gguf".to_string(),
+                filename: Some("Phi-3-mini-4k-instruct-q4.gguf".to_string()),
             },
             batch_size: 512,
             use_hf_params: true,
@@ -74,13 +74,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Add user message that should trigger tool use
-    session.messages.push(Message {
+    let message = Message {
         role: MessageRole::User,
         content: "Please list the files in the current directory and tell me about any Rust files you find.".to_string(),
         tool_call_id: None,
         tool_name: None,
         timestamp: SystemTime::now(),
-    });
+    };
+    agent.add_message(&session.id, message).await?;
 
     // Generate initial response that might contain tool calls
     let request = GenerationRequest {

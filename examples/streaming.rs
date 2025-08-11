@@ -26,8 +26,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AgentConfig {
         model: ModelConfig {
             source: ModelSource::HuggingFace {
-                repo: "microsoft/DialoGPT-medium".to_string(),
-                filename: None,
+                repo: "microsoft/Phi-3-mini-4k-instruct-gguf".to_string(),
+                filename: Some("Phi-3-mini-4k-instruct-q4.gguf".to_string()),
             },
             batch_size: 512,
             use_hf_params: true,
@@ -47,17 +47,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let agent = AgentServer::initialize(config).await?;
 
     // Create a session
-    let mut session = agent.create_session().await?;
+    let session = agent.create_session().await?;
     info!("Created session: {}", session.id);
 
     // Add user message
-    session.messages.push(Message {
+    let message = Message {
         role: MessageRole::User,
         content: "Please write a detailed explanation of how machine learning works, including key concepts and examples.".to_string(),
         tool_call_id: None,
         tool_name: None,
         timestamp: SystemTime::now(),
-    });
+    };
+    agent.add_message(&session.id, message).await?;
 
     // Create generation request for streaming
     // Use builder pattern with stopping configuration for streaming
@@ -128,14 +129,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Comparing with batch generation for the same prompt...");
 
     // Create a new session with the same message
-    let mut batch_session = agent.create_session().await?;
-    batch_session.messages.push(Message {
+    let batch_session = agent.create_session().await?;
+    let batch_message = Message {
         role: MessageRole::User,
         content: "Please write a detailed explanation of how machine learning works, including key concepts and examples.".to_string(),
         tool_call_id: None,
         tool_name: None,
         timestamp: SystemTime::now(),
-    });
+    };
+    agent.add_message(&batch_session.id, batch_message).await?;
 
     // Compare with batch generation using explicit config
     let batch_request = GenerationRequest::new(batch_session.id)

@@ -29,8 +29,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AgentConfig {
         model: ModelConfig {
             source: ModelSource::HuggingFace {
-                repo: "microsoft/DialoGPT-medium".to_string(),
-                filename: None,
+                repo: "microsoft/Phi-3-mini-4k-instruct-gguf".to_string(),
+                filename: Some("Phi-3-mini-4k-instruct-q4.gguf".to_string()),
             },
             batch_size: 512,
             use_hf_params: true,
@@ -93,8 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let fallback_config = AgentConfig {
                 model: ModelConfig {
                     source: ModelSource::HuggingFace {
-                        repo: "microsoft/DialoGPT-medium".to_string(),
-                        filename: None,
+                        repo: "microsoft/Phi-3-mini-4k-instruct-gguf".to_string(),
+                        filename: Some("Phi-3-mini-4k-instruct-q4.gguf".to_string()),
                     },
                     batch_size: 512,
                     use_hf_params: true,
@@ -162,13 +162,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Example 1: File System Operations");
     println!("{}", "=".repeat(60));
 
-    session.messages.push(Message {
+    let message1 = Message {
         role: MessageRole::User,
         content: "Please list the files in the current directory and tell me about any README files you find.".to_string(),
         tool_call_id: None,
         tool_name: None,
         timestamp: SystemTime::now(),
-    });
+    };
+    agent.add_message(&session.id, message1).await?;
 
     let request1 = GenerationRequest {
         session_id: session.id,
@@ -188,13 +189,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
 
             // Add response to session for context
-            session.messages.push(Message {
+            let response_message = Message {
                 role: MessageRole::Assistant,
                 content: response.generated_text,
                 tool_call_id: None,
                 tool_name: None,
                 timestamp: SystemTime::now(),
-            });
+            };
+            agent.add_message(&session.id, response_message).await?;
         }
         Err(e) => {
             warn!("Example 1 failed: {}", e);
