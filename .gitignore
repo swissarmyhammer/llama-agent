@@ -55,3 +55,6 @@ tmp
 REVIEW_*.md
 CODE_REVIEW.md
 TEST_FAILURES.md
+
+# Generated embedding output files
+*.parquet
