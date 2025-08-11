@@ -57,13 +57,16 @@ pub fn validate_embed_args(args: &EmbedArgs) -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("Batch size must be greater than 0"));
     }
 
-    // Validate output directory exists or can be created
+    // Ensure output directory exists, creating it if necessary
     if let Some(parent) = args.output.parent() {
         if !parent.exists() {
-            return Err(anyhow::anyhow!(
-                "Output directory does not exist: {}",
-                parent.display()
-            ));
+            std::fs::create_dir_all(parent).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to create output directory '{}': {}",
+                    parent.display(),
+                    e
+                )
+            })?;
         }
     }
 

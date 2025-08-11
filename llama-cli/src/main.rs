@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             let error_msg = e.to_string();
-            
+
             // Check error type for appropriate exit codes
             let exit_code = if error_msg.contains("does not exist")
                 || error_msg.contains("Invalid HuggingFace")
