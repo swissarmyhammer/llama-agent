@@ -32,8 +32,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AgentConfig {
         model: ModelConfig {
             source: ModelSource::HuggingFace {
-                repo: "microsoft/DialoGPT-medium".to_string(),
-                filename: None, // Auto-detect with BF16 preference
+                repo: "microsoft/Phi-3-mini-4k-instruct-gguf".to_string(),
+                filename: Some("Phi-3-mini-4k-instruct-q4.gguf".to_string()),
             },
             batch_size: 512,
             use_hf_params: true, // Use HuggingFace generation_config.json
@@ -84,13 +84,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Add a message that might trigger tool use
-    session.messages.push(Message {
+    let message = Message {
         role: MessageRole::User,
         content: "Can you list the files in the current directory?".to_string(),
         tool_call_id: None,
         tool_name: None,
         timestamp: SystemTime::now(),
-    });
+    };
+    agent.add_message(&session.id, message).await?;
 
     // Generate response
     // Create generation request with explicit stopping configuration
