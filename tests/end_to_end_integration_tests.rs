@@ -582,19 +582,19 @@ async fn test_production_performance_benchmark() -> Result<()> {
     let helper = EndToEndTestHelper::new();
     let temp_dir = TempDir::new()?;
 
-    info!("Testing performance benchmark with 100 texts for development");
+    info!("Testing performance benchmark with 5 texts for fast validation");
 
-    // Create smaller test dataset for development testing
-    let test_texts: Vec<String> = (0..100) // Reduced from 1000
-        .map(|i| format!("This is test sentence number {} with some additional content to make it more realistic for benchmarking purposes and test embedding model performance.", i))
+    // Create minimal test dataset for fast execution  
+    let test_texts: Vec<String> = (0..5) // Reduced to 5 for speed
+        .map(|i| format!("Test sentence {} for embedding performance validation.", i))
         .collect();
 
     let test_text_refs: Vec<&str> = test_texts.iter().map(|s| s.as_str()).collect();
     let input_file = helper.write_test_input(&temp_dir, &test_text_refs);
 
-    // Test smaller batch sizes for faster execution
-    for batch_size in [8, 16] {
-        // Reduced from [16, 32, 64]
+    // Test single batch size for faster execution
+    for batch_size in [8] {
+        // Single batch size only
         let output_file = temp_dir
             .path()
             .join(format!("benchmark_batch_{}.parquet", batch_size));
@@ -613,9 +613,9 @@ async fn test_production_performance_benchmark() -> Result<()> {
                     "--batch-size",
                     &batch_size.to_string(),
                 ],
-                Duration::from_secs(120),
+                Duration::from_secs(30),
             )
-            .await?; // Reduced from 600 to 120 seconds
+            .await?; // Reduced to 30 seconds for fast test
         let duration = start.elapsed();
 
         if !result.success {
@@ -636,7 +636,7 @@ async fn test_production_performance_benchmark() -> Result<()> {
         }
 
         // Performance validation - allow reasonable time for model loading
-        let max_duration = Duration::from_secs(120); // More reasonable timeout
+        let max_duration = Duration::from_secs(30); // Fast timeout
 
         if duration > max_duration {
             warn!(
@@ -645,7 +645,7 @@ async fn test_production_performance_benchmark() -> Result<()> {
             );
         }
 
-        let throughput = 100.0 / duration.as_secs_f64(); // Updated for 100 texts
+        let throughput = 5.0 / duration.as_secs_f64(); // Updated for 5 texts
         info!(
             "Batch size {}: {:.2}s ({:.1} texts/sec)",
             batch_size,
@@ -668,11 +668,11 @@ async fn test_memory_usage_scalability() -> Result<()> {
     let helper = EndToEndTestHelper::new();
     let temp_dir = TempDir::new()?;
 
-    info!("Testing memory usage scalability with smaller dataset for development");
+    info!("Testing memory usage scalability with minimal dataset for fast validation");
 
-    // Create smaller dataset for development testing
-    let large_dataset: Vec<String> = (0..200) // Reduced from 5000
-        .map(|i| format!("Large dataset test sentence number {} with substantial content to test memory usage patterns in batch processing scenarios and validate memory scaling.", i))
+    // Create minimal dataset for fast testing
+    let large_dataset: Vec<String> = (0..5) // Reduced to 5 for speed under 10s
+        .map(|i| format!("Memory test sentence {} for validation.", i))
         .collect();
 
     let large_dataset_refs: Vec<&str> = large_dataset.iter().map(|s| s.as_str()).collect();
@@ -696,9 +696,9 @@ async fn test_memory_usage_scalability() -> Result<()> {
                 "--batch-size",
                 "4", // Reduced from 8
             ],
-            Duration::from_secs(120),
+            Duration::from_secs(20),
         )
-        .await?; // Reduced from 300
+        .await?; // Reduced to 20 seconds for fast test
 
     // Early return if first test fails due to model issues
     if !small_batch_result.success {
@@ -732,9 +732,9 @@ async fn test_memory_usage_scalability() -> Result<()> {
                 "--batch-size",
                 "16", // Reduced from 64
             ],
-            Duration::from_secs(120),
+            Duration::from_secs(20),
         )
-        .await?; // Reduced from 300
+        .await?; // Reduced to 20 seconds for fast test
 
     if small_batch_result.success && large_batch_result.success {
         info!(

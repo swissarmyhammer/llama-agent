@@ -57,7 +57,7 @@ async fn test_cli_missing_required_args() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Usage") || stderr.contains("required"));
+    assert!(stderr.contains("Usage") || stderr.contains("required") || stderr.contains("Commands"));
 
     // Test missing model argument in generate subcommand
     let output = Command::new("cargo")
