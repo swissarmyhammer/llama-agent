@@ -584,10 +584,11 @@ async fn test_production_performance_benchmark() -> Result<()> {
 
     info!("Testing performance benchmark with 5 texts for fast validation");
 
-    // Create minimal test dataset for fast execution  
-    let test_texts: Vec<String> = (0..5) // Reduced to 5 for speed
-        .map(|i| format!("Test sentence {} for embedding performance validation.", i))
-        .collect();
+    // Create minimal test dataset for fast execution
+    let test_texts: Vec<String> =
+        (0..5) // Reduced to 5 for speed
+            .map(|i| format!("Test sentence {} for embedding performance validation.", i))
+            .collect();
 
     let test_text_refs: Vec<&str> = test_texts.iter().map(|s| s.as_str()).collect();
     let input_file = helper.write_test_input(&temp_dir, &test_text_refs);
@@ -671,9 +672,10 @@ async fn test_memory_usage_scalability() -> Result<()> {
     info!("Testing memory usage scalability with minimal dataset for fast validation");
 
     // Create minimal dataset for fast testing
-    let large_dataset: Vec<String> = (0..5) // Reduced to 5 for speed under 10s
-        .map(|i| format!("Memory test sentence {} for validation.", i))
-        .collect();
+    let large_dataset: Vec<String> =
+        (0..5) // Reduced to 5 for speed under 10s
+            .map(|i| format!("Memory test sentence {} for validation.", i))
+            .collect();
 
     let large_dataset_refs: Vec<&str> = large_dataset.iter().map(|s| s.as_str()).collect();
     let input_file = helper.write_test_input(&temp_dir, &large_dataset_refs);
