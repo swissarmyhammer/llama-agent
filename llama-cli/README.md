@@ -21,7 +21,7 @@ cargo build --release --bin llama-cli
 Generate text using language models:
 
 ```bash
-llama-cli generate --model Qwen/Qwen2.5-7B-Instruct-GGUF --prompt "Hello world"
+llama-cli generate --model Qwen/Qwen3-1.7B-GGUF --prompt "What is an apple?" --limit 64
 ```
 
 **Options:**
