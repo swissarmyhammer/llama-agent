@@ -84,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate initial response that might contain tool calls
     let request = GenerationRequest {
-        session_id: session.id.clone(),
+        session_id: session.id,
         max_tokens: Some(200),
         temperature: Some(0.7),
         top_p: Some(0.9),
@@ -172,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Generate final response incorporating tool results
                     let final_request = GenerationRequest {
-                        session_id: session.id.clone(),
+                        session_id: session.id,
                         max_tokens: Some(200),
                         temperature: Some(0.7),
                         top_p: Some(0.9),

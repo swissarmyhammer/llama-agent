@@ -39,8 +39,14 @@ Thumbs.db
 
 # MCP and semantic search files (per coding standards)
 mcp.log
+**/mcp.log
 semantic.db
+**/semantic.db
 tmp
+
+# Cache directories
+.cache/
+*/.cache/
 
 # FastEmbed cache directory
 .fastembed_cache/

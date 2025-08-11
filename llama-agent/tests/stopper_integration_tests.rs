@@ -49,7 +49,7 @@ impl TestSetup {
 
         // Download and load model
         let model_repo = "unsloth/Qwen3-0.6B-GGUF";
-        let model_filename = "qwen3-0.6b-q4_k_m.gguf"; // Using Q4_K_M quantization for good balance of speed/quality
+        let model_filename = "Qwen3-0.6B-Q4_K_M.gguf"; // Using Q4_K_M quantization for good balance of speed/quality
 
         info!("Downloading model {} from {}", model_filename, model_repo);
 
@@ -65,7 +65,7 @@ impl TestSetup {
                     model_filename, e
                 );
                 // Fallback to the smallest available model
-                let fallback_filename = "qwen3-0.6b-q8_0.gguf";
+                let fallback_filename = "Qwen3-0.6B-Q8_0.gguf";
                 match repo.get(fallback_filename).await {
                     Ok(path) => {
                         info!(

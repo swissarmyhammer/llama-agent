@@ -525,7 +525,7 @@ async fn test_streaming_patterns() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let generation_request = GenerationRequest {
-        session_id: session.id.clone(),
+        session_id: session.id,
         max_tokens: Some(100),
         temperature: Some(0.7),
         top_p: Some(0.9),
@@ -676,13 +676,13 @@ async fn test_cli_argument_patterns() -> Result<(), Box<dyn std::error::Error>> 
     let invalid_temperatures = vec![-0.1, 2.1, 10.0];
 
     for temp in valid_temperatures {
-        if temp < 0.0 || temp > 2.0 {
+        if !(0.0..=2.0).contains(&temp) {
             return Err(format!("Valid temperature failed range check: {}", temp).into());
         }
     }
 
     for temp in invalid_temperatures {
-        if temp >= 0.0 && temp <= 2.0 {
+        if (0.0..=2.0).contains(&temp) {
             return Err(format!("Invalid temperature passed range check: {}", temp).into());
         }
     }

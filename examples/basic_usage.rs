@@ -100,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         eos_detection: true,
     };
 
-    let request = GenerationRequest::new(session.id.clone())
+    let request = GenerationRequest::new(session.id)
         .with_temperature(0.7)
         .with_top_p(0.9)
         .with_stopping_config(stopping_config);

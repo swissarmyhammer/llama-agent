@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let request1 = GenerationRequest {
-        session_id: session.id.clone(),
+        session_id: session.id,
         max_tokens: Some(300),
         temperature: Some(0.3),
         top_p: Some(0.9),
@@ -216,7 +216,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let request2 = GenerationRequest {
-        session_id: session.id.clone(),
+        session_id: session.id,
         max_tokens: Some(400),
         temperature: Some(0.3),
         top_p: Some(0.9),
@@ -260,7 +260,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let request3 = GenerationRequest {
-        session_id: session.id.clone(),
+        session_id: session.id,
         max_tokens: Some(200),
         temperature: Some(0.3),
         top_p: Some(0.9),

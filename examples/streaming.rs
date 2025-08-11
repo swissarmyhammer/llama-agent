@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create generation request for streaming
     // Use builder pattern with stopping configuration for streaming
-    let request = GenerationRequest::new(session.id.clone())
+    let request = GenerationRequest::new(session.id)
         .with_max_tokens(500)
         .with_temperature(0.7)
         .with_top_p(0.9)
@@ -138,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Compare with batch generation using explicit config
-    let batch_request = GenerationRequest::new(batch_session.id.clone())
+    let batch_request = GenerationRequest::new(batch_session.id)
         .with_max_tokens(500)
         .with_temperature(0.7)
         .with_top_p(0.9)

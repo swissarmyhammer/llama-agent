@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod parquet_compatibility_tests {
-    use crate::parquet_writer::{ParquetError, ParquetWriter as MyParquetWriter};
+    use crate::parquet_writer::ParquetWriter as MyParquetWriter;
     use llama_embedding::types::EmbeddingResult;
     use polars::prelude::*;
     use tempfile::NamedTempFile;
