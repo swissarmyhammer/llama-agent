@@ -181,7 +181,7 @@ impl ChatTemplateEngine {
         })?;
 
         Ok(format!(
-            "You are an AI assistant with access to the following tools. You have full permission and capability to use these tools to help users with their requests. Do not make security excuses - you are designed to use these tools.\n\nAvailable tools:\n{}\n\nIMPORTANT: When a user asks you to perform an action like listing files, reading files, or any file operations, you MUST use the appropriate tool. Do not give security warnings or suggest alternative methods - use the tools directly.\n\nTo call a tool, respond with a JSON object in this exact format:\n{{\n  \"function_name\": \"tool_name\",\n  \"arguments\": {{\n    \"parameter\": \"value\"\n  }}\n}}\n\nFor example, when asked to list files in the current directory, respond with:\n{{\n  \"function_name\": \"list_directory\",\n  \"arguments\": {{\n    \"path\": \".\"\n  }}\n}}\n\nAlways use the tools when they are needed to fulfill user requests.",
+            "You are an AI assistant with access to the following tools. You have full permission and capability to use these tools to help users with their requests. Do not make security excuses - you are designed to use these tools.\n\nAvailable tools:\n{}\n\nIMPORTANT: When a user asks you to perform an action like listing files, reading files, or any file operations, you MUST use the appropriate tool. Do not give security warnings or suggest alternative methods - use the tools directly.\n\nTo call a tool, respond with a JSON object in this exact format. CRITICAL: Provide ONLY the JSON object, no additional text before or after:\n{{\n  \"function_name\": \"tool_name\",\n  \"arguments\": {{\n    \"parameter\": \"value\"\n  }}\n}}\n\nFor example, when asked to list files in the current directory, respond with ONLY:\n{{\n  \"function_name\": \"list_directory\",\n  \"arguments\": {{\n    \"path\": \".\"\n  }}\n}}\n\nDo not add explanatory text before or after the JSON. Generate well-formed JSON only. Always use the tools when they are needed to fulfill user requests.",
             formatted
         ))
     }
@@ -462,8 +462,9 @@ impl Default for JsonToolCallParser {
 
 impl JsonToolCallParser {
     pub fn new() -> Self {
-        // Match JSON objects with a simple approach
-        let regex = Regex::new(r#"\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\}"#).unwrap();
+        // Improved regex to match JSON objects more accurately
+        // This will match properly balanced JSON objects (handles one level of nesting well)
+        let regex = Regex::new(r#"\{(?:[^{}]|\{[^{}]*\})*\}"#).unwrap();
 
         Self { regex }
     }
@@ -472,23 +473,48 @@ impl JsonToolCallParser {
 impl ToolCallParser for JsonToolCallParser {
     fn parse_tool_calls(&self, text: &str) -> Result<Vec<ToolCall>, TemplateError> {
         let mut tool_calls = Vec::new();
+        debug!(
+            "JsonToolCallParser: Analyzing text for JSON objects: {}",
+            text
+        );
 
+        // First try the main regex approach
         for capture in self.regex.find_iter(text) {
             let json_str = capture.as_str();
+            debug!("JsonToolCallParser: Found potential JSON: {}", json_str);
 
             match serde_json::from_str::<Value>(json_str) {
                 Ok(json) => {
+                    debug!("JsonToolCallParser: Successfully parsed JSON: {:?}", json);
                     if let Some(tool_call) = self.parse_json_tool_call(&json)? {
+                        debug!("JsonToolCallParser: Extracted tool call: {:?}", tool_call);
                         tool_calls.push(tool_call);
+                    } else {
+                        debug!("JsonToolCallParser: JSON doesn't match tool call format");
                     }
                 }
                 Err(e) => {
-                    debug!("Failed to parse JSON tool call: {}", e);
+                    debug!(
+                        "JsonToolCallParser: Failed to parse JSON '{}': {}",
+                        json_str, e
+                    );
                     continue;
                 }
             }
         }
 
+        // If no tool calls found with regex, try a more lenient line-by-line approach
+        if tool_calls.is_empty() {
+            debug!(
+                "JsonToolCallParser: No tool calls found with regex, trying line-by-line parsing"
+            );
+            self.try_line_by_line_parsing(text, &mut tool_calls)?;
+        }
+
+        debug!(
+            "JsonToolCallParser: Extracted {} tool calls total",
+            tool_calls.len()
+        );
         Ok(tool_calls)
     }
 }
@@ -533,6 +559,133 @@ impl JsonToolCallParser {
         }
 
         Ok(None)
+    }
+
+    fn try_line_by_line_parsing(
+        &self,
+        text: &str,
+        tool_calls: &mut Vec<ToolCall>,
+    ) -> Result<(), TemplateError> {
+        debug!("JsonToolCallParser: Trying line-by-line parsing");
+
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                debug!("JsonToolCallParser: Found JSON-like line: {}", trimmed);
+
+                match serde_json::from_str::<Value>(trimmed) {
+                    Ok(json) => {
+                        if let Some(tool_call) = self.parse_json_tool_call(&json)? {
+                            debug!(
+                                "JsonToolCallParser: Line-by-line extracted tool call: {:?}",
+                                tool_call
+                            );
+                            tool_calls.push(tool_call);
+                        }
+                    }
+                    Err(e) => {
+                        debug!("JsonToolCallParser: Failed to parse line as JSON: {}", e);
+                    }
+                }
+            }
+        }
+
+        // Additional fallback: try to extract JSON from text that might have trailing characters
+        if tool_calls.is_empty() {
+            debug!("JsonToolCallParser: Trying fallback parsing for malformed JSON");
+            self.try_fallback_parsing(text, tool_calls)?;
+        }
+
+        Ok(())
+    }
+
+    fn try_fallback_parsing(
+        &self,
+        text: &str,
+        tool_calls: &mut Vec<ToolCall>,
+    ) -> Result<(), TemplateError> {
+        // Use a more sophisticated approach to find JSON objects that might be malformed
+        
+        // Find potential JSON start patterns
+        let start_patterns = vec![
+            r#"\{\s*"function_name"\s*:"#,
+            r#"\{\s*"tool"\s*:"#,
+            r#"\{\s*"name"\s*:"#,
+        ];
+
+        for pattern_str in start_patterns {
+            let pattern = Regex::new(pattern_str).unwrap();
+            
+            for mat in pattern.find_iter(text) {
+                let start_pos = mat.start();
+                debug!("JsonToolCallParser: Found potential JSON start at position {}", start_pos);
+                
+                // Try to find the matching closing brace using brace counting
+                let remaining_text = &text[start_pos..];
+                if let Some(json_str) = self.extract_balanced_json(remaining_text) {
+                    debug!("JsonToolCallParser: Extracted balanced JSON: {}", json_str);
+                    
+                    match serde_json::from_str::<Value>(&json_str) {
+                        Ok(json) => {
+                            if let Some(tool_call) = self.parse_json_tool_call(&json)? {
+                                debug!("JsonToolCallParser: Fallback extracted tool call: {:?}", tool_call);
+                                tool_calls.push(tool_call);
+                            }
+                        }
+                        Err(e) => {
+                            debug!("JsonToolCallParser: Fallback JSON parsing failed: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn extract_balanced_json(&self, text: &str) -> Option<String> {
+        let mut brace_count = 0;
+        let mut start_found = false;
+        let mut in_string = false;
+        let mut escape_next = false;
+        let mut result = String::new();
+        
+        for ch in text.chars() {
+            result.push(ch);
+            
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+            
+            match ch {
+                '\\' if in_string => {
+                    escape_next = true;
+                }
+                '"' => {
+                    in_string = !in_string;
+                }
+                '{' if !in_string => {
+                    brace_count += 1;
+                    start_found = true;
+                }
+                '}' if !in_string => {
+                    brace_count -= 1;
+                    if start_found && brace_count == 0 {
+                        // Found complete JSON object
+                        return Some(result);
+                    }
+                }
+                _ => {}
+            }
+            
+            // If we've seen many characters without closing, give up
+            if result.len() > 10000 {
+                break;
+            }
+        }
+        
+        None
     }
 }
 
@@ -751,6 +904,68 @@ mod tests {
     }
 
     #[test]
+    fn test_json_tool_call_parser_mixed_with_text() {
+        let parser = JsonToolCallParser::new();
+
+        // Test mixed with text before and after - this is what models actually generate
+        let text = r#"I'll help you list the files in the current directory.
+
+{"function_name": "list_directory", "arguments": {"path": "."}}
+
+I apologize for the confusion. Let me try again with the correct format."#;
+        
+        let tool_calls = parser.parse_tool_calls(text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_directory");
+
+        // Test with complex nested arguments
+        let complex_text = r#"{"function_name": "complex_tool", "arguments": {"nested": {"key": "value", "array": [1, 2, 3]}, "simple": "test"}}"#;
+        let tool_calls = parser.parse_tool_calls(complex_text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "complex_tool");
+
+        // Test problematic case: JSON followed immediately by text (what models actually do)
+        let problematic_text = r#"{"function_name": "list_directory", "arguments": {"path": "."}}I apologize for the confusion"#;
+        let tool_calls = parser.parse_tool_calls(problematic_text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_directory");
+
+        // Test even more complex nesting with multiple levels
+        let deep_nested = r#"{"function_name": "deep_tool", "arguments": {"level1": {"level2": {"level3": {"value": "test"}}}, "array": [{"nested": true}, {"nested": false}]}}"#;
+        let tool_calls = parser.parse_tool_calls(deep_nested).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "deep_tool");
+    }
+
+    #[test]
+    fn test_json_tool_call_parser_fallback_parsing() {
+        // Initialize tracing for test debugging
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .try_init();
+            
+        let parser = JsonToolCallParser::new();
+
+        // Test malformed JSON that would need fallback parsing (missing closing brace)
+        let malformed_text = r#"Sure, I can help! {"function_name": "list_directory", "arguments": {"path": "."}} I need to check what's in your directory first."#;
+        let tool_calls = parser.parse_tool_calls(malformed_text).unwrap();
+        // Should work with new balanced brace extraction
+        println!("Malformed text extracted {} tool calls", tool_calls.len());
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_directory");
+
+        // Test case where JSON is buried in lots of text
+        let buried_text = r#"
+        Let me help you with that task. First, I need to understand what files are available.
+        I'll use the directory listing tool to check: {"function_name": "list_directory", "arguments": {"path": "."}}
+        After checking the directory, I can provide better assistance.
+        "#;
+        let tool_calls = parser.parse_tool_calls(buried_text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_directory");
+    }
+
+    #[test]
     fn test_xml_tool_call_parser() {
         let parser = XmlToolCallParser::new();
 
@@ -786,6 +1001,11 @@ mod tests {
 
     #[test]
     fn test_debug_logging_tool_extraction() {
+        // Initialize tracing for test debugging
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .try_init();
+        
         // This test verifies that our debug logging enhancements work
         let engine = ChatTemplateEngine::new();
 
@@ -804,6 +1024,14 @@ mod tests {
         let empty_text = "Just a regular response with no tool calls.";
         let empty_calls = engine.extract_tool_calls(empty_text).unwrap();
         assert_eq!(empty_calls.len(), 0);
+
+        // Test actual problematic pattern that models generate
+        let problematic_text = r#"{"function_name": "list_directory", "arguments": {"path": "."}}I need to check the files in the current directory for you."#;
+        println!("Testing problematic text: {}", problematic_text);
+        let tool_calls = engine.extract_tool_calls(problematic_text).unwrap();
+        println!("Extracted {} tool calls", tool_calls.len());
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_directory");
     }
 
     #[test]
