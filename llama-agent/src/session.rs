@@ -87,6 +87,20 @@ impl SessionManager {
         }
     }
 
+    pub async fn update_session(&self, updated_session: Session) -> Result<(), SessionError> {
+        let mut sessions = self.sessions.write().await;
+
+        match sessions.get_mut(&updated_session.id) {
+            Some(session) => {
+                *session = updated_session;
+                session.updated_at = SystemTime::now();
+                debug!("Updated session: {}", session.id);
+                Ok(())
+            }
+            None => Err(SessionError::NotFound(updated_session.id.to_string())),
+        }
+    }
+
     pub async fn delete_session(&self, session_id: &SessionId) -> Result<bool, SessionError> {
         let mut sessions = self.sessions.write().await;
 

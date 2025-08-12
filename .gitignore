@@ -58,3 +58,6 @@ TEST_FAILURES.md
 
 # Generated embedding output files
 *.parquet
+
+# Swiss Army Hammer tools directory
+.swissarmyhammer/

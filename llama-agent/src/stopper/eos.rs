@@ -143,12 +143,6 @@ impl Stopper for EosStopper {
         // Validate that we have access to the model context
         let _model = &context.model;
 
-        // Log debug information about the configured EOS token
-        debug!(
-            eos_token_id = self.eos_token_id,
-            "EOS stopper configured and ready for integration"
-        );
-
         // Verify the stopper is properly initialized
         if self.eos_token_id == u32::MAX {
             warn!(

@@ -493,7 +493,7 @@ impl RequestQueue {
         );
 
         // Format the session messages into a prompt using ChatTemplateEngine
-        let prompt = match chat_template.render_session(session, model) {
+        let prompt = match chat_template.render_session_with_config(session, model, Some(model_manager.get_config())) {
             Ok(prompt) => prompt,
             Err(e) => {
                 error!("Failed to render session prompt: {}", e);
@@ -532,7 +532,7 @@ impl RequestQueue {
         debug!("Tokenized prompt to {} tokens", tokens_list.len());
 
         // Create batch for initial prompt processing
-        let batch_size = 512;
+        let batch_size = model_manager.get_batch_size();
         let mut batch = LlamaBatch::new(batch_size, 1);
 
         // Add prompt tokens to batch
@@ -778,7 +778,7 @@ impl RequestQueue {
         );
 
         // Format the session messages into a prompt using ChatTemplateEngine
-        let prompt = match chat_template.render_session(session, model) {
+        let prompt = match chat_template.render_session_with_config(session, model, Some(model_manager.get_config())) {
             Ok(prompt) => prompt,
             Err(e) => {
                 error!("Failed to render session prompt for streaming: {}", e);
