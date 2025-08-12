@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 repo: "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF".to_string(),
                 filename: Some("Qwen3-Coder-30B-A3B-Instruct-UD-Q6_K_XL.gguf".to_string()),
             },
-            batch_size: 8192,
+            batch_size: 4096,
             use_hf_params: true, // Use HuggingFace generation_config.json
             retry_config: RetryConfig::default(),
             debug: true,
