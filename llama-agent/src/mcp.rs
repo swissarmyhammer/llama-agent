@@ -617,22 +617,20 @@ impl MCPServer for MCPServerImpl {
             tool_name, self.config.name
         );
 
-        // Similar to list_tools, we need mutable access for sending requests
-        // In a real implementation, this would be handled with proper state management
-        // For now, return a basic success response to maintain compatibility
+        // Send actual MCP tool call request
+        let params = json!({
+            "name": tool_name,
+            "arguments": args
+        });
+
+        let result = self.send_request("tools/call", params).await?;
 
         debug!(
             "Tool '{}' on server '{}' completed successfully",
             tool_name, self.config.name
         );
 
-        Ok(json!({
-            "content": [{
-                "type": "text",
-                "text": format!("Tool '{}' executed successfully with arguments: {}", tool_name, args)
-            }],
-            "is_error": false
-        }))
+        Ok(result)
     }
 
     async fn health(&self) -> Result<HealthStatus, MCPError> {
