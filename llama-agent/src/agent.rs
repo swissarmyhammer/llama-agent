@@ -173,15 +173,37 @@ impl AgentServer {
         let futures = tool_calls.into_iter().map(|tool_call| {
             let session = session.clone();
             async move {
-                debug!("Starting parallel execution of tool: {}", tool_call.name);
+                debug!(
+                    "Starting parallel execution of tool: {} (id: {})",
+                    tool_call.name, tool_call.id
+                );
+                debug!("Parallel tool call arguments: {}", tool_call.arguments);
 
                 match self.execute_tool(tool_call.clone(), &session).await {
                     Ok(result) => {
-                        debug!("Parallel tool call '{}' completed", tool_call.name);
+                        if let Some(error) = &result.error {
+                            debug!(
+                                "Parallel tool call '{}' completed with error: {}",
+                                tool_call.name, error
+                            );
+                        } else {
+                            debug!(
+                                "Parallel tool call '{}' completed successfully",
+                                tool_call.name
+                            );
+                            debug!(
+                                "Parallel tool call '{}' result: {}",
+                                tool_call.name, result.result
+                            );
+                        }
                         result
                     }
                     Err(e) => {
                         error!("Parallel tool call '{}' failed: {}", tool_call.name, e);
+                        debug!(
+                            "Parallel tool call '{}' unexpected error details: {}",
+                            tool_call.name, e
+                        );
                         ToolResult {
                             call_id: tool_call.id,
                             result: serde_json::Value::Null,
@@ -211,7 +233,20 @@ impl AgentServer {
         // Extract tool calls from the generated text
         let tool_calls = match self.chat_template.extract_tool_calls(text) {
             Ok(calls) => {
-                debug!("Successfully extracted tool calls from text");
+                debug!(
+                    "Successfully extracted {} tool calls from text",
+                    calls.len()
+                );
+                debug!("Tool call extraction result:");
+                for (i, call) in calls.iter().enumerate() {
+                    debug!(
+                        "  Tool call {}: name='{}', id='{}', arguments={}",
+                        i + 1,
+                        call.name,
+                        call.id,
+                        call.arguments
+                    );
+                }
                 calls
             }
             Err(e) => {
@@ -269,16 +304,32 @@ impl AgentServer {
                     tool_call.name,
                     tool_call.id
                 );
+                debug!("Tool call arguments: {}", tool_call.arguments);
 
                 // Execute tool call - errors are handled within execute_tool and returned as ToolResult
+                debug!(
+                    "Executing tool call '{}' with id '{}'...",
+                    tool_call.name, tool_call.id
+                );
                 match self.execute_tool(tool_call.clone(), session).await {
                     Ok(result) => {
-                        if result.error.is_some() {
+                        if let Some(error) = &result.error {
                             failed_calls += 1;
-                            warn!("Tool call '{}' completed with error", tool_call.name);
+                            warn!(
+                                "Tool call '{}' completed with error: {}",
+                                tool_call.name, error
+                            );
+                            debug!(
+                                "Tool call '{}' error result: call_id={}, error={}",
+                                tool_call.name, result.call_id, error
+                            );
                         } else {
                             successful_calls += 1;
                             debug!("Tool call '{}' completed successfully", tool_call.name);
+                            debug!(
+                                "Tool call '{}' success result: call_id={}, result={}",
+                                tool_call.name, result.call_id, result.result
+                            );
                         }
                         results.push(result);
                     }
@@ -631,16 +682,41 @@ impl AgentAPI for AgentServer {
                 "Generation iteration {} completed: {} tokens, finish_reason: {:?}",
                 iterations, response.tokens_generated, response.finish_reason
             );
+            debug!(
+                "Generated text in iteration {}: '{}'",
+                iterations,
+                if response.generated_text.len() > 200 {
+                    format!(
+                        "{}...(truncated, total {} chars)",
+                        &response.generated_text[..200],
+                        response.generated_text.len()
+                    )
+                } else {
+                    response.generated_text.clone()
+                }
+            );
 
             // Check if response contains tool calls
             match &response.finish_reason {
                 crate::types::FinishReason::Stopped(reason) if reason == "Tool call detected" => {
-                    debug!("Response contains tool calls, processing...");
+                    debug!(
+                        "Tool call detected in iteration {}, processing tool calls...",
+                        iterations
+                    );
+                    debug!(
+                        "Generated text for tool call processing: {}",
+                        response.generated_text
+                    );
 
                     // Process tool calls
+                    debug!("Beginning tool call processing workflow...");
                     let tool_results = self
                         .process_tool_calls(&response.generated_text, &working_session)
                         .await?;
+                    debug!(
+                        "Tool call processing completed with {} results",
+                        tool_results.len()
+                    );
 
                     if tool_results.is_empty() {
                         debug!("No tool results returned, ending tool call workflow");
@@ -650,6 +726,10 @@ impl AgentAPI for AgentServer {
                     // Add the assistant's response (with tool calls) to the session
                     debug!("Adding assistant message with tool calls to session");
                     debug!("Assistant message content: {}", response.generated_text);
+                    debug!(
+                        "Session message count before adding assistant message: {}",
+                        working_session.messages.len()
+                    );
                     working_session.messages.push(crate::types::Message {
                         role: crate::types::MessageRole::Assistant,
                         content: response.generated_text.clone(),
@@ -657,12 +737,21 @@ impl AgentAPI for AgentServer {
                         tool_name: None,
                         timestamp: std::time::SystemTime::now(),
                     });
+                    debug!(
+                        "Session message count after adding assistant message: {}",
+                        working_session.messages.len()
+                    );
 
                     // Add tool results as Tool messages to the session
                     debug!(
                         "Adding {} tool results as messages to session",
                         tool_results.len()
                     );
+                    debug!(
+                        "Session message count before adding tool results: {}",
+                        working_session.messages.len()
+                    );
+
                     for (i, tool_result) in tool_results.iter().enumerate() {
                         let tool_content = if let Some(error) = &tool_result.error {
                             debug!("Tool result {}: ERROR - {}", i + 1, error);
@@ -674,7 +763,16 @@ impl AgentAPI for AgentServer {
                             content
                         };
 
-                        debug!("Adding tool message for call_id: {}", tool_result.call_id);
+                        debug!(
+                            "Adding tool message {}/{} for call_id: {}",
+                            i + 1,
+                            tool_results.len(),
+                            tool_result.call_id
+                        );
+                        debug!(
+                            "Tool message content length: {} characters",
+                            tool_content.len()
+                        );
                         working_session.messages.push(crate::types::Message {
                             role: crate::types::MessageRole::Tool,
                             content: tool_content,
@@ -682,6 +780,11 @@ impl AgentAPI for AgentServer {
                             tool_name: None,
                             timestamp: std::time::SystemTime::now(),
                         });
+                        debug!(
+                            "Session message count after adding tool result {}: {}",
+                            i + 1,
+                            working_session.messages.len()
+                        );
                     }
 
                     working_session.updated_at = std::time::SystemTime::now();
@@ -690,15 +793,25 @@ impl AgentAPI for AgentServer {
                         "Tool call processing completed with {} results, continuing generation",
                         tool_results.len()
                     );
+                    debug!(
+                        "Final session message count after tool workflow: {}",
+                        working_session.messages.len()
+                    );
+                    debug!("Continuing to next iteration {} to generate response incorporating tool results", iterations + 1);
 
                     // Continue the loop to generate response incorporating tool results
                     continue;
                 }
-                crate::types::FinishReason::Stopped(_) => {
+                crate::types::FinishReason::Stopped(reason) => {
                     // No more tool calls, we're done
                     debug!(
-                        "Generation completed without tool calls after {} iterations",
-                        iterations
+                        "Generation completed without tool calls after {} iterations (reason: {})",
+                        iterations, reason
+                    );
+                    debug!("Final generated text: {}", response.generated_text);
+                    debug!(
+                        "Final accumulated response length: {} characters",
+                        accumulated_response.len()
                     );
                     break;
                 }
