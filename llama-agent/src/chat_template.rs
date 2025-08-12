@@ -785,6 +785,28 @@ mod tests {
     }
 
     #[test]
+    fn test_debug_logging_tool_extraction() {
+        // This test verifies that our debug logging enhancements work
+        let engine = ChatTemplateEngine::new();
+
+        // Test with a tool call that should be extracted
+        let text = r#"
+        I'll help you list the files in the current directory.
+        {"function_name": "list_directory", "arguments": {"path": "."}}
+        "#;
+
+        // This will trigger our enhanced debug logging in extract_tool_calls
+        let tool_calls = engine.extract_tool_calls(text).unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "list_directory");
+
+        // Test with text that has no tool calls
+        let empty_text = "Just a regular response with no tool calls.";
+        let empty_calls = engine.extract_tool_calls(empty_text).unwrap();
+        assert_eq!(empty_calls.len(), 0);
+    }
+
+    #[test]
     fn test_extract_tool_calls_no_matches() {
         let engine = ChatTemplateEngine::new();
 
