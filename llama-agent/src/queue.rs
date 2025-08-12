@@ -493,7 +493,11 @@ impl RequestQueue {
         );
 
         // Format the session messages into a prompt using ChatTemplateEngine
-        let prompt = match chat_template.render_session_with_config(session, model, Some(model_manager.get_config())) {
+        let prompt = match chat_template.render_session_with_config(
+            session,
+            model,
+            Some(model_manager.get_config()),
+        ) {
             Ok(prompt) => prompt,
             Err(e) => {
                 error!("Failed to render session prompt: {}", e);
@@ -533,6 +537,21 @@ impl RequestQueue {
 
         // Create batch for initial prompt processing
         let batch_size = model_manager.get_batch_size();
+
+        // Validate that prompt tokens don't exceed batch size
+        if tokens_list.len() > batch_size {
+            error!(
+                "Prompt token count ({}) exceeds configured batch size ({}). Consider reducing prompt length or increasing batch_size in config.",
+                tokens_list.len(),
+                batch_size
+            );
+            return Err(QueueError::WorkerError(format!(
+                "Prompt too long: {} tokens exceeds batch size limit of {}",
+                tokens_list.len(),
+                batch_size
+            )));
+        }
+
         let mut batch = LlamaBatch::new(batch_size, 1);
 
         // Add prompt tokens to batch
@@ -778,7 +797,11 @@ impl RequestQueue {
         );
 
         // Format the session messages into a prompt using ChatTemplateEngine
-        let prompt = match chat_template.render_session_with_config(session, model, Some(model_manager.get_config())) {
+        let prompt = match chat_template.render_session_with_config(
+            session,
+            model,
+            Some(model_manager.get_config()),
+        ) {
             Ok(prompt) => prompt,
             Err(e) => {
                 error!("Failed to render session prompt for streaming: {}", e);
@@ -823,7 +846,23 @@ impl RequestQueue {
         );
 
         // Create and process initial batch
-        let batch_size = 512;
+        let batch_size = model_manager.get_batch_size();
+
+        // Validate that prompt tokens don't exceed batch size
+        if tokens_list.len() > batch_size {
+            error!(
+                "Streaming prompt token count ({}) exceeds configured batch size ({}). Consider reducing prompt length or increasing batch_size in config.",
+                tokens_list.len(),
+                batch_size
+            );
+            let _ = stream_sender.try_send(Err(QueueError::WorkerError(format!(
+                "Prompt too long: {} tokens exceeds batch size limit of {}",
+                tokens_list.len(),
+                batch_size
+            ))));
+            return Ok(());
+        }
+
         let mut batch = LlamaBatch::new(batch_size, 1);
 
         // Add prompt tokens to batch
