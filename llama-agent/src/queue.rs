@@ -2,8 +2,8 @@ use crate::chat_template::ChatTemplateEngine;
 use crate::model::ModelManager;
 use crate::stopper::{EosStopper, MaxTokensStopper, RepetitionStopper, Stopper};
 use crate::types::{
-    FinishReason, GenerationRequest, GenerationResponse, MessageRole, QueueConfig, QueueError,
-    Session, StreamChunk,
+    FinishReason, GenerationRequest, GenerationResponse, QueueConfig, QueueError, Session,
+    StreamChunk,
 };
 use llama_cpp_2::{
     llama_batch::LlamaBatch,
@@ -736,36 +736,6 @@ impl RequestQueue {
             generation_time,
             finish_reason: final_finish_reason,
         })
-    }
-
-    fn format_session_prompt(session: &Session) -> Result<String, QueueError> {
-        let mut prompt = String::new();
-
-        for message in &session.messages {
-            match message.role {
-                MessageRole::System => {
-                    prompt.push_str(&format!("System: {}\n", message.content));
-                }
-                MessageRole::User => {
-                    prompt.push_str(&format!("User: {}\n", message.content));
-                }
-                MessageRole::Assistant => {
-                    prompt.push_str(&format!("Assistant: {}\n", message.content));
-                }
-                MessageRole::Tool => {
-                    if let Some(tool_name) = &message.tool_name {
-                        prompt.push_str(&format!("Tool ({}): {}\n", tool_name, message.content));
-                    } else {
-                        prompt.push_str(&format!("Tool: {}\n", message.content));
-                    }
-                }
-            }
-        }
-
-        // Add assistant prompt to continue generation
-        prompt.push_str("Assistant:");
-
-        Ok(prompt)
     }
 
     fn should_stop(generated_text: &str, stop_tokens: &[String]) -> bool {

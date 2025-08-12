@@ -201,7 +201,7 @@ impl ModelManager {
         model: &'a LlamaModel,
     ) -> Result<LlamaContext<'a>, ModelError> {
         // Ensure context size is at least as large as batch size, minimum 8192
-        let n_ctx = std::cmp::max(8192, self.config.batch_size as u32) as u32;
+        let n_ctx = std::cmp::max(8192, self.config.batch_size);
         let n_batch = self.config.batch_size;
         let n_ubatch = self.config.batch_size;
 
