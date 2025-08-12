@@ -206,22 +206,37 @@ impl AgentServer {
         session: &Session,
     ) -> Result<Vec<ToolResult>, AgentError> {
         debug!("Processing tool calls from generated text");
+        debug!("Generated text to analyze: {}", text);
 
         // Extract tool calls from the generated text
         let tool_calls = match self.chat_template.extract_tool_calls(text) {
-            Ok(calls) => calls,
+            Ok(calls) => {
+                debug!("Successfully extracted tool calls from text");
+                calls
+            }
             Err(e) => {
                 error!("Failed to extract tool calls from text: {}", e);
+                debug!("Text that failed tool call extraction: {}", text);
                 return Ok(Vec::new()); // Return empty results rather than failing
             }
         };
 
         if tool_calls.is_empty() {
             debug!("No tool calls found in generated text");
+            debug!("Text analyzed: {}", text);
             return Ok(Vec::new());
         }
 
         debug!("Found {} tool calls to process", tool_calls.len());
+        for (i, tool_call) in tool_calls.iter().enumerate() {
+            debug!(
+                "Tool call {}: name='{}', id='{}', arguments={}",
+                i + 1,
+                tool_call.name,
+                tool_call.id,
+                tool_call.arguments
+            );
+        }
         let mut results = Vec::new();
         let mut successful_calls = 0;
         let mut failed_calls = 0;
@@ -576,6 +591,22 @@ impl AgentAPI for AgentServer {
                 "Tool call iteration {} for session: {}",
                 iterations, working_session.id
             );
+            debug!(
+                "Current session has {} messages",
+                working_session.messages.len()
+            );
+            for (i, msg) in working_session.messages.iter().enumerate() {
+                debug!(
+                    "Message {}: {:?} - {}",
+                    i + 1,
+                    msg.role,
+                    if msg.content.len() > 100 {
+                        format!("{}...", &msg.content[..100])
+                    } else {
+                        msg.content.clone()
+                    }
+                );
+            }
 
             // Create generation request with current session state
             let current_request = GenerationRequest {
@@ -617,6 +648,8 @@ impl AgentAPI for AgentServer {
                     }
 
                     // Add the assistant's response (with tool calls) to the session
+                    debug!("Adding assistant message with tool calls to session");
+                    debug!("Assistant message content: {}", response.generated_text);
                     working_session.messages.push(crate::types::Message {
                         role: crate::types::MessageRole::Assistant,
                         content: response.generated_text.clone(),
@@ -626,14 +659,22 @@ impl AgentAPI for AgentServer {
                     });
 
                     // Add tool results as Tool messages to the session
-                    for tool_result in &tool_results {
+                    debug!(
+                        "Adding {} tool results as messages to session",
+                        tool_results.len()
+                    );
+                    for (i, tool_result) in tool_results.iter().enumerate() {
                         let tool_content = if let Some(error) = &tool_result.error {
+                            debug!("Tool result {}: ERROR - {}", i + 1, error);
                             format!("Error: {}", error)
                         } else {
-                            serde_json::to_string(&tool_result.result)
-                                .unwrap_or_else(|_| "Invalid tool result".to_string())
+                            let content = serde_json::to_string(&tool_result.result)
+                                .unwrap_or_else(|_| "Invalid tool result".to_string());
+                            debug!("Tool result {}: SUCCESS - {}", i + 1, content);
+                            content
                         };
 
+                        debug!("Adding tool message for call_id: {}", tool_result.call_id);
                         working_session.messages.push(crate::types::Message {
                             role: crate::types::MessageRole::Tool,
                             content: tool_content,
@@ -789,6 +830,7 @@ impl AgentAPI for AgentServer {
             "Executing tool call: {} (id: {}) in session: {}",
             tool_call.name, tool_call.id, session.id
         );
+        debug!("Tool call arguments: {}", tool_call.arguments);
 
         // Validate tool call name is not empty
         if tool_call.name.trim().is_empty() {
@@ -843,13 +885,22 @@ impl AgentAPI for AgentServer {
         }
 
         // Execute the tool call through MCP client with error handling
+        debug!(
+            "Calling MCP server '{}' for tool '{}'",
+            tool_def.server_name, tool_call.name
+        );
         match self
             .mcp_client
-            .call_tool(&tool_def.server_name, &tool_call.name, tool_call.arguments)
+            .call_tool(
+                &tool_def.server_name,
+                &tool_call.name,
+                tool_call.arguments.clone(),
+            )
             .await
         {
             Ok(result_value) => {
                 debug!("Tool call '{}' completed successfully", tool_call.name);
+                debug!("Tool call result: {}", result_value);
                 Ok(ToolResult {
                     call_id: tool_call.id,
                     result: result_value,
@@ -859,6 +910,7 @@ impl AgentAPI for AgentServer {
             Err(mcp_error) => {
                 let error_msg = format!("Tool execution failed: {}", mcp_error);
                 error!("Tool call '{}' failed: {}", tool_call.name, error_msg);
+                debug!("Failed tool call arguments were: {}", tool_call.arguments);
 
                 // Return ToolResult with error instead of propagating the error
                 // This allows the workflow to continue with partial failures
