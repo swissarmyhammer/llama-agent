@@ -299,7 +299,13 @@ impl AgentServer {
 
     async fn render_session_prompt(&self, session: &Session) -> Result<String, AgentError> {
         self.model_manager
-            .with_model(|model| self.chat_template.render_session_with_config(session, model, Some(&self.config.model)))
+            .with_model(|model| {
+                self.chat_template.render_session_with_config(
+                    session,
+                    model,
+                    Some(&self.config.model),
+                )
+            })
             .await?
             .map_err(AgentError::Template)
     }

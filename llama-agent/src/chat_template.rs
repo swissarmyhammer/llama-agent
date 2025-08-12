@@ -88,7 +88,10 @@ impl ChatTemplateEngine {
 
         // Include available tools in the template context if present
         let tools_context = if !session.available_tools.is_empty() {
-            debug!("Session has {} available tools, formatting for template", session.available_tools.len());
+            debug!(
+                "Session has {} available tools, formatting for template",
+                session.available_tools.len()
+            );
             Some(self.format_tools_for_template(&session.available_tools)?)
         } else {
             debug!("Session has no available tools");
@@ -96,8 +99,12 @@ impl ChatTemplateEngine {
         };
 
         // Apply the model's chat template
-        let rendered =
-            self.apply_chat_template_with_tools(model, &chat_messages, tools_context.as_deref(), model_config)?;
+        let rendered = self.apply_chat_template_with_tools(
+            model,
+            &chat_messages,
+            tools_context.as_deref(),
+            model_config,
+        )?;
 
         debug!("Rendered prompt length: {}", rendered.len());
         Ok(rendered)
@@ -200,7 +207,7 @@ impl ChatTemplateEngine {
     ) -> Result<String, TemplateError> {
         // Detect model type from model metadata or filename
         let model_name = self.detect_model_type(model, model_config);
-        
+
         match model_name.as_str() {
             "phi3" => self.format_phi3_template(messages, tools_context),
             "qwen" => self.format_qwen_template(messages, tools_context),
@@ -222,10 +229,13 @@ impl ChatTemplateEngine {
                     }
                 }
             };
-            
+
             let model_identifier_lower = model_identifier.to_lowercase();
             if model_identifier_lower.contains("qwen") {
-                debug!("Detected Qwen model from model config: {}", model_identifier);
+                debug!(
+                    "Detected Qwen model from model config: {}",
+                    model_identifier
+                );
                 return "qwen".to_string();
             }
             if model_identifier_lower.contains("phi") {
@@ -233,7 +243,7 @@ impl ChatTemplateEngine {
                 return "phi3".to_string();
             }
         }
-        
+
         // Fallback to environment variable (for explicit override)
         let model_repo = std::env::var("MODEL_REPO").unwrap_or_default();
         if model_repo.contains("Qwen") || model_repo.contains("qwen") {
@@ -244,7 +254,7 @@ impl ChatTemplateEngine {
             debug!("Detected Phi model from MODEL_REPO env var");
             return "phi3".to_string();
         }
-        
+
         // Check process arguments for model path/name (common when running examples)
         let args: Vec<String> = std::env::args().collect();
         let args_string = args.join(" ");
@@ -256,7 +266,7 @@ impl ChatTemplateEngine {
             debug!("Detected Phi model from process arguments");
             return "phi3".to_string();
         }
-        
+
         // Check current working directory for clues (model files often contain model name)
         if let Ok(cwd) = std::env::current_dir() {
             let cwd_string = cwd.to_string_lossy().to_lowercase();
@@ -269,7 +279,7 @@ impl ChatTemplateEngine {
                 return "phi3".to_string();
             }
         }
-        
+
         // Default to qwen as it works well with most instruction-tuned models
         debug!("Using default Qwen chat template (no specific model detected)");
         "qwen".to_string()
@@ -336,7 +346,10 @@ impl ChatTemplateEngine {
 
         // Add tools context as system message if provided
         if let Some(tools) = tools_context {
-            debug!("Adding tools context to Qwen template: {} characters", tools.len());
+            debug!(
+                "Adding tools context to Qwen template: {} characters",
+                tools.len()
+            );
             formatted_messages.push(("system".to_string(), tools.to_string()));
         } else {
             debug!("No tools context provided to Qwen template");
