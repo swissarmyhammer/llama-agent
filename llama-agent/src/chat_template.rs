@@ -462,8 +462,9 @@ impl Default for JsonToolCallParser {
 
 impl JsonToolCallParser {
     pub fn new() -> Self {
-        // Match JSON objects with a simple approach
-        let regex = Regex::new(r#"\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\}"#).unwrap();
+        // Improved regex to match JSON objects more accurately
+        // This will match properly balanced JSON objects
+        let regex = Regex::new(r#"\{(?:[^{}]|\{[^{}]*\})*\}"#).unwrap();
 
         Self { regex }
     }
@@ -472,23 +473,37 @@ impl JsonToolCallParser {
 impl ToolCallParser for JsonToolCallParser {
     fn parse_tool_calls(&self, text: &str) -> Result<Vec<ToolCall>, TemplateError> {
         let mut tool_calls = Vec::new();
+        debug!("JsonToolCallParser: Analyzing text for JSON objects: {}", text);
 
+        // First try the main regex approach
         for capture in self.regex.find_iter(text) {
             let json_str = capture.as_str();
+            debug!("JsonToolCallParser: Found potential JSON: {}", json_str);
 
             match serde_json::from_str::<Value>(json_str) {
                 Ok(json) => {
+                    debug!("JsonToolCallParser: Successfully parsed JSON: {:?}", json);
                     if let Some(tool_call) = self.parse_json_tool_call(&json)? {
+                        debug!("JsonToolCallParser: Extracted tool call: {:?}", tool_call);
                         tool_calls.push(tool_call);
+                    } else {
+                        debug!("JsonToolCallParser: JSON doesn't match tool call format");
                     }
                 }
                 Err(e) => {
-                    debug!("Failed to parse JSON tool call: {}", e);
+                    debug!("JsonToolCallParser: Failed to parse JSON '{}': {}", json_str, e);
                     continue;
                 }
             }
         }
 
+        // If no tool calls found with regex, try a more lenient line-by-line approach
+        if tool_calls.is_empty() {
+            debug!("JsonToolCallParser: No tool calls found with regex, trying line-by-line parsing");
+            self.try_line_by_line_parsing(text, &mut tool_calls)?;
+        }
+
+        debug!("JsonToolCallParser: Extracted {} tool calls total", tool_calls.len());
         Ok(tool_calls)
     }
 }
@@ -533,6 +548,31 @@ impl JsonToolCallParser {
         }
 
         Ok(None)
+    }
+
+    fn try_line_by_line_parsing(&self, text: &str, tool_calls: &mut Vec<ToolCall>) -> Result<(), TemplateError> {
+        debug!("JsonToolCallParser: Trying line-by-line parsing");
+        
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                debug!("JsonToolCallParser: Found JSON-like line: {}", trimmed);
+                
+                match serde_json::from_str::<Value>(trimmed) {
+                    Ok(json) => {
+                        if let Some(tool_call) = self.parse_json_tool_call(&json)? {
+                            debug!("JsonToolCallParser: Line-by-line extracted tool call: {:?}", tool_call);
+                            tool_calls.push(tool_call);
+                        }
+                    }
+                    Err(e) => {
+                        debug!("JsonToolCallParser: Failed to parse line as JSON: {}", e);
+                    }
+                }
+            }
+        }
+        
+        Ok(())
     }
 }
 
