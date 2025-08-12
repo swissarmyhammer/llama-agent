@@ -492,8 +492,17 @@ impl RequestQueue {
             worker_id, request_id
         );
 
-        // Format the session messages into a prompt
-        let prompt = Self::format_session_prompt(session)?;
+        // Format the session messages into a prompt using ChatTemplateEngine
+        let prompt = match chat_template.render_session(session, model) {
+            Ok(prompt) => prompt,
+            Err(e) => {
+                error!("Failed to render session prompt: {}", e);
+                return Err(QueueError::WorkerError(format!(
+                    "Template rendering failed: {}",
+                    e
+                )));
+            }
+        };
         debug!("Formatted prompt: {}", prompt);
 
         // Create context for this inference
@@ -768,8 +777,18 @@ impl RequestQueue {
             worker_id, request_id
         );
 
-        // Format the session messages into a prompt
-        let prompt = Self::format_session_prompt(session)?;
+        // Format the session messages into a prompt using ChatTemplateEngine
+        let prompt = match chat_template.render_session(session, model) {
+            Ok(prompt) => prompt,
+            Err(e) => {
+                error!("Failed to render session prompt for streaming: {}", e);
+                let _ = stream_sender.try_send(Err(QueueError::WorkerError(format!(
+                    "Template rendering failed: {}",
+                    e
+                ))));
+                return Ok(());
+            }
+        };
         debug!("Formatted prompt for streaming: {}", prompt);
 
         // Create context for this inference

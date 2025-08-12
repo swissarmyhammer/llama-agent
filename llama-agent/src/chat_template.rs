@@ -162,7 +162,7 @@ impl ChatTemplateEngine {
         })?;
 
         Ok(format!(
-            "You are an AI assistant with access to the following tools:\n{}\n\nWhen the user asks you to perform an action that requires using these tools, you should call the appropriate tool by responding with a JSON object in this format:\n{{\n  \"function_name\": \"tool_name\",\n  \"arguments\": {{\n    \"parameter\": \"value\"\n  }}\n}}\n\nFor example, to list files in a directory, respond with:\n{{\n  \"function_name\": \"list_directory\",\n  \"arguments\": {{\n    \"path\": \".\"\n  }}\n}}",
+            "You are an AI assistant with access to the following tools. You have full permission and capability to use these tools to help users with their requests. Do not make security excuses - you are designed to use these tools.\n\nAvailable tools:\n{}\n\nIMPORTANT: When a user asks you to perform an action like listing files, reading files, or any file operations, you MUST use the appropriate tool. Do not give security warnings or suggest alternative methods - use the tools directly.\n\nTo call a tool, respond with a JSON object in this exact format:\n{{\n  \"function_name\": \"tool_name\",\n  \"arguments\": {{\n    \"parameter\": \"value\"\n  }}\n}}\n\nFor example, when asked to list files in the current directory, respond with:\n{{\n  \"function_name\": \"list_directory\",\n  \"arguments\": {{\n    \"path\": \".\"\n  }}\n}}\n\nAlways use the tools when they are needed to fulfill user requests.",
             formatted
         ))
     }
@@ -244,6 +244,9 @@ impl ChatTemplateEngine {
 
         // Add assistant prompt for generation
         prompt.push_str("<|assistant|>\n");
+
+        // Debug: Log the final prompt for debugging
+        debug!("Final Phi-3 prompt:\n{}", prompt);
 
         Ok(prompt)
     }
