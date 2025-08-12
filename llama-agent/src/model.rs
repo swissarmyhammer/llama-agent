@@ -177,6 +177,14 @@ impl ModelManager {
         model_lock.is_some()
     }
 
+    pub fn get_batch_size(&self) -> usize {
+        self.config.batch_size as usize
+    }
+
+    pub fn get_config(&self) -> &ModelConfig {
+        &self.config
+    }
+
     pub async fn with_model<F, R>(&self, f: F) -> Result<R, ModelError>
     where
         F: FnOnce(&LlamaModel) -> R,
@@ -192,12 +200,12 @@ impl ModelManager {
         &self,
         model: &'a LlamaModel,
     ) -> Result<LlamaContext<'a>, ModelError> {
-        let context_params = LlamaContextParams::default();
+        let context_params = LlamaContextParams::default()
+            .with_n_batch(self.config.batch_size)
+            .with_n_ubatch(self.config.batch_size);
 
-        // Note: Context parameters optimization would need proper API methods
-        // For now, using default parameters for compatibility
         debug!(
-            "Creating context with default parameters for batch_size={}",
+            "Creating context with batch_size={}",
             self.config.batch_size
         );
 

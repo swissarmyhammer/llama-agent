@@ -1,4 +1,4 @@
-use crate::types::{Session, TemplateError, ToolCall, ToolCallId, ToolDefinition};
+use crate::types::{ModelConfig, Session, TemplateError, ToolCall, ToolCallId, ToolDefinition};
 use llama_cpp_2::model::LlamaModel;
 use regex::Regex;
 use serde_json::Value;
@@ -49,6 +49,16 @@ impl ChatTemplateEngine {
         session: &Session,
         model: &LlamaModel,
     ) -> Result<String, TemplateError> {
+        self.render_session_with_config(session, model, None)
+    }
+
+    /// Render a session into a prompt string using the model's chat template with config
+    pub fn render_session_with_config(
+        &self,
+        session: &Session,
+        model: &LlamaModel,
+        model_config: Option<&ModelConfig>,
+    ) -> Result<String, TemplateError> {
         debug!("Rendering session with {} messages", session.messages.len());
 
         // Convert session messages to the format expected by llama-cpp-2
@@ -78,14 +88,16 @@ impl ChatTemplateEngine {
 
         // Include available tools in the template context if present
         let tools_context = if !session.available_tools.is_empty() {
+            debug!("Session has {} available tools, formatting for template", session.available_tools.len());
             Some(self.format_tools_for_template(&session.available_tools)?)
         } else {
+            debug!("Session has no available tools");
             None
         };
 
         // Apply the model's chat template
         let rendered =
-            self.apply_chat_template_with_tools(model, &chat_messages, tools_context.as_deref())?;
+            self.apply_chat_template_with_tools(model, &chat_messages, tools_context.as_deref(), model_config)?;
 
         debug!("Rendered prompt length: {}", rendered.len());
         Ok(rendered)
@@ -134,7 +146,7 @@ impl ChatTemplateEngine {
         // Try to apply a simple template to check if it works
         let test_messages = vec![("user".to_string(), "Hello".to_string())];
 
-        match self.apply_chat_template_with_tools(model, &test_messages, None) {
+        match self.apply_chat_template_with_tools(model, &test_messages, None, None) {
             Ok(_) => {
                 debug!("Chat template validation successful");
                 Ok(())
@@ -173,8 +185,9 @@ impl ChatTemplateEngine {
         model: &LlamaModel,
         messages: &[(String, String)],
         tools_context: Option<&str>,
+        model_config: Option<&ModelConfig>,
     ) -> Result<String, TemplateError> {
-        self.format_chat_template_for_model(model, messages, tools_context)
+        self.format_chat_template_for_model(model, messages, tools_context, model_config)
     }
 
     /// Format chat template based on model type
@@ -183,21 +196,83 @@ impl ChatTemplateEngine {
         model: &LlamaModel,
         messages: &[(String, String)],
         tools_context: Option<&str>,
+        model_config: Option<&ModelConfig>,
     ) -> Result<String, TemplateError> {
         // Detect model type from model metadata or filename
-        let model_name = self.detect_model_type(model);
+        let model_name = self.detect_model_type(model, model_config);
         
         match model_name.as_str() {
             "phi3" => self.format_phi3_template(messages, tools_context),
+            "qwen" => self.format_qwen_template(messages, tools_context),
             _ => self.format_chat_template(messages, tools_context),
         }
     }
 
     /// Detect model type from model information
-    fn detect_model_type(&self, _model: &LlamaModel) -> String {
-        // For now, we'll assume Phi-3 based on the model we know we're using
-        // In the future, this could inspect model metadata
-        "phi3".to_string()
+    fn detect_model_type(&self, _model: &LlamaModel, model_config: Option<&ModelConfig>) -> String {
+        // First check model config if available
+        if let Some(config) = model_config {
+            let model_identifier = match &config.source {
+                crate::types::ModelSource::HuggingFace { repo, .. } => repo.clone(),
+                crate::types::ModelSource::Local { folder, filename } => {
+                    if let Some(filename) = filename {
+                        format!("{}/{}", folder.display(), filename)
+                    } else {
+                        folder.to_string_lossy().to_string()
+                    }
+                }
+            };
+            
+            let model_identifier_lower = model_identifier.to_lowercase();
+            if model_identifier_lower.contains("qwen") {
+                debug!("Detected Qwen model from model config: {}", model_identifier);
+                return "qwen".to_string();
+            }
+            if model_identifier_lower.contains("phi") {
+                debug!("Detected Phi model from model config: {}", model_identifier);
+                return "phi3".to_string();
+            }
+        }
+        
+        // Fallback to environment variable (for explicit override)
+        let model_repo = std::env::var("MODEL_REPO").unwrap_or_default();
+        if model_repo.contains("Qwen") || model_repo.contains("qwen") {
+            debug!("Detected Qwen model from MODEL_REPO env var");
+            return "qwen".to_string();
+        }
+        if model_repo.contains("Phi") || model_repo.contains("phi") {
+            debug!("Detected Phi model from MODEL_REPO env var");
+            return "phi3".to_string();
+        }
+        
+        // Check process arguments for model path/name (common when running examples)
+        let args: Vec<String> = std::env::args().collect();
+        let args_string = args.join(" ");
+        if args_string.contains("Qwen") || args_string.contains("qwen") {
+            debug!("Detected Qwen model from process arguments");
+            return "qwen".to_string();
+        }
+        if args_string.contains("Phi") || args_string.contains("phi") {
+            debug!("Detected Phi model from process arguments");
+            return "phi3".to_string();
+        }
+        
+        // Check current working directory for clues (model files often contain model name)
+        if let Ok(cwd) = std::env::current_dir() {
+            let cwd_string = cwd.to_string_lossy().to_lowercase();
+            if cwd_string.contains("qwen") {
+                debug!("Detected Qwen model from current directory path");
+                return "qwen".to_string();
+            }
+            if cwd_string.contains("phi") {
+                debug!("Detected Phi model from current directory path");
+                return "phi3".to_string();
+            }
+        }
+        
+        // Default to qwen as it works well with most instruction-tuned models
+        debug!("Using default Qwen chat template (no specific model detected)");
+        "qwen".to_string()
     }
 
     /// Format chat template specifically for Phi-3 models
@@ -247,6 +322,60 @@ impl ChatTemplateEngine {
 
         // Debug: Log the final prompt for debugging
         debug!("Final Phi-3 prompt:\n{}", prompt);
+
+        Ok(prompt)
+    }
+
+    /// Format chat template specifically for Qwen models
+    fn format_qwen_template(
+        &self,
+        messages: &[(String, String)],
+        tools_context: Option<&str>,
+    ) -> Result<String, TemplateError> {
+        let mut formatted_messages = Vec::new();
+
+        // Add tools context as system message if provided
+        if let Some(tools) = tools_context {
+            debug!("Adding tools context to Qwen template: {} characters", tools.len());
+            formatted_messages.push(("system".to_string(), tools.to_string()));
+        } else {
+            debug!("No tools context provided to Qwen template");
+        }
+
+        // Add all conversation messages
+        for (role, content) in messages {
+            formatted_messages.push((role.clone(), content.clone()));
+        }
+
+        // Use ChatML format for Qwen models
+        let mut prompt = String::new();
+
+        for (role, content) in &formatted_messages {
+            match role.as_str() {
+                "system" => {
+                    prompt.push_str(&format!("<|im_start|>system\n{}<|im_end|>\n", content));
+                }
+                "user" => {
+                    prompt.push_str(&format!("<|im_start|>user\n{}<|im_end|>\n", content));
+                }
+                "assistant" => {
+                    prompt.push_str(&format!("<|im_start|>assistant\n{}<|im_end|>\n", content));
+                }
+                "tool" => {
+                    prompt.push_str(&format!("<|im_start|>tool\n{}<|im_end|>\n", content));
+                }
+                _ => {
+                    // Fallback to user for unknown roles
+                    prompt.push_str(&format!("<|im_start|>user\n{}<|im_end|>\n", content));
+                }
+            }
+        }
+
+        // Add assistant prompt for generation
+        prompt.push_str("<|im_start|>assistant\n");
+
+        // Debug: Log the final prompt for debugging
+        debug!("Final Qwen prompt:\n{}", prompt);
 
         Ok(prompt)
     }

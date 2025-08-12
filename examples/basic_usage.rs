@@ -34,13 +34,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AgentConfig {
         model: ModelConfig {
             source: ModelSource::HuggingFace {
-                repo: "microsoft/Phi-3-mini-4k-instruct-gguf".to_string(),
-                filename: Some("Phi-3-mini-4k-instruct-q4.gguf".to_string()),
+                repo: "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF".to_string(),
+                filename: Some("Qwen3-Coder-30B-A3B-Instruct-UD-Q6_K_XL.gguf".to_string()),
             },
-            batch_size: 512,
+            batch_size: 8192,
             use_hf_params: true, // Use HuggingFace generation_config.json
             retry_config: RetryConfig::default(),
-            debug: false,
+            debug: true,
         },
         queue_config: QueueConfig {
             max_queue_size: 100,

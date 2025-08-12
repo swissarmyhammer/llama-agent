@@ -260,15 +260,6 @@ impl Stopper for MaxTokensStopper {
         let previous_count = self.tokens_generated;
         self.tokens_generated += tokens_in_batch;
 
-        // Log token progress at debug level
-        debug!(
-            max_tokens = self.max_tokens,
-            tokens_generated = self.tokens_generated,
-            tokens_in_batch = tokens_in_batch,
-            tokens_remaining = self.tokens_remaining(),
-            "MaxTokensStopper updated token count"
-        );
-
         // Check for potential overflow (defensive programming)
         if self.tokens_generated < previous_count {
             warn!(

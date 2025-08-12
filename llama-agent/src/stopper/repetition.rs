@@ -405,8 +405,6 @@ impl RepetitionStopper {
             return;
         }
 
-        debug!("Adding token text: '{}' (len: {})", token_text, text_len);
-
         self.text_window.push_back(token_text);
         self.current_window_size += text_len;
 
@@ -507,12 +505,6 @@ impl Stopper for RepetitionStopper {
         // 3. Pattern detection needs actual text content, not token sequences
         // 4. Integration point is in queue.rs where both tokens and text are available
 
-        debug!(
-            window_tokens = self.text_window.len(),
-            window_chars = self.current_window_size,
-            "RepetitionStopper evaluating current window"
-        );
-
         // Early return if insufficient text for analysis
         if self.text_window.is_empty() {
             debug!("No text in window, continuing generation");
@@ -558,10 +550,7 @@ impl Stopper for RepetitionStopper {
 
                 Some(FinishReason::Stopped(message))
             }
-            None => {
-                debug!("No repetitive patterns detected, continuing generation");
-                None
-            }
+            None => None,
         }
     }
 
