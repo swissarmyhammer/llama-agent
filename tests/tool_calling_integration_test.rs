@@ -10,6 +10,7 @@
 //!
 //! This is a comprehensive test that proves the tool calling system works.
 
+use llama_agent::chat_template::ChatTemplateEngine;
 use llama_agent::{
     types::{
         AgentAPI, AgentConfig, FinishReason, GenerationRequest, MCPServerConfig, Message,
@@ -18,7 +19,6 @@ use llama_agent::{
     },
     AgentServer,
 };
-use llama_agent::chat_template::ChatTemplateEngine;
 use std::time::{Duration, SystemTime};
 use tracing::{info, warn};
 
@@ -71,7 +71,10 @@ async fn test_complete_tool_calling_workflow() -> Result<(), Box<dyn std::error:
 
     // Discover tools from MCP servers
     agent.discover_tools(&mut session).await?;
-    info!("Available tools discovered: {}", session.available_tools.len());
+    info!(
+        "Available tools discovered: {}",
+        session.available_tools.len()
+    );
 
     // Verify we have the expected filesystem tools
     assert!(
@@ -113,7 +116,10 @@ async fn test_complete_tool_calling_workflow() -> Result<(), Box<dyn std::error:
         }
         Err(e) => {
             warn!("⚠️  Complete workflow test encountered issues: {}", e);
-            println!("⚠️  Tool calling workflow test completed with warnings: {}", e);
+            println!(
+                "⚠️  Tool calling workflow test completed with warnings: {}",
+                e
+            );
             // Don't fail the test if it's just a model generation issue
             // The important part is that the infrastructure works
         }
@@ -125,7 +131,7 @@ async fn test_complete_tool_calling_workflow() -> Result<(), Box<dyn std::error:
 
 /// Test that the ChatTemplateEngine can extract tool calls from various text patterns
 async fn test_tool_call_extraction_patterns(
-    agent: &AgentServer,
+    _agent: &AgentServer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Testing tool call extraction patterns");
 
@@ -165,7 +171,10 @@ This should show the files."#;
 Here are the results."#;
 
     let xml_extracted = chat_template.extract_tool_calls(xml_text)?;
-    info!("Extracted {} tool calls from XML format", xml_extracted.len());
+    info!(
+        "Extracted {} tool calls from XML format",
+        xml_extracted.len()
+    );
 
     // Test function call format
     let func_text = r#"Let me list the directory contents.
@@ -196,7 +205,10 @@ async fn test_direct_tool_execution(
         arguments: serde_json::json!({"path": "."}),
     };
 
-    info!("Executing tool call: {} with args: {}", tool_call.name, tool_call.arguments);
+    info!(
+        "Executing tool call: {} with args: {}",
+        tool_call.name, tool_call.arguments
+    );
 
     // Execute the tool call
     let result = agent.execute_tool(tool_call.clone(), session).await?;
@@ -205,7 +217,10 @@ async fn test_direct_tool_execution(
 
     // Verify the result
     assert_eq!(result.call_id, tool_call.id);
-    assert!(result.error.is_none(), "Tool execution should not have errors");
+    assert!(
+        result.error.is_none(),
+        "Tool execution should not have errors"
+    );
 
     // The result should contain directory listing information
     let result_str = result.result.to_string();
@@ -213,10 +228,8 @@ async fn test_direct_tool_execution(
 
     // Verify it contains some expected files from our project
     // These files should exist in the llama-agent project
-    let expected_files = vec!["Cargo.toml", "README.md"];
-    let has_expected_content = expected_files
-        .iter()
-        .any(|file| result_str.contains(file));
+    let expected_files = ["Cargo.toml", "README.md"];
+    let has_expected_content = expected_files.iter().any(|file| result_str.contains(file));
 
     if !has_expected_content {
         warn!(
@@ -277,7 +290,7 @@ async fn test_generation_with_tool_calls(
         FinishReason::Stopped(reason) => {
             if reason == "Tool call detected" {
                 info!("✅ Tool call was detected and processed during generation");
-                
+
                 // The generated text should contain the results of tool execution
                 // Since the generate method processes tool calls automatically,
                 // the response should include both the tool call and its results
@@ -285,34 +298,40 @@ async fn test_generation_with_tool_calls(
                     !response.generated_text.trim().is_empty(),
                     "Generated text should not be empty when tool calls are processed"
                 );
-                
+
                 info!("✅ Generation workflow with tool calls completed successfully");
             } else {
-                warn!("Generation completed with reason: {} (no tool calls detected)", reason);
-                
+                warn!(
+                    "Generation completed with reason: {} (no tool calls detected)",
+                    reason
+                );
+
                 // Even if no tool calls were detected, let's verify the generated text
                 // contains some reasonable response to the directory listing request
                 let text_lower = response.generated_text.to_lowercase();
-                let has_relevant_content = text_lower.contains("directory") 
-                    || text_lower.contains("files") 
+                let has_relevant_content = text_lower.contains("directory")
+                    || text_lower.contains("files")
                     || text_lower.contains("list");
-                
+
                 if has_relevant_content {
                     info!("Generated text is relevant to the request, even without tool calls");
                 } else {
                     warn!("Generated text doesn't seem relevant to directory listing request");
                 }
-                
+
                 // Try to extract tool calls manually from the generated text
                 let chat_template = ChatTemplateEngine::new();
                 let extracted_calls = chat_template.extract_tool_calls(&response.generated_text)?;
-                
+
                 if !extracted_calls.is_empty() {
-                    info!("Found {} extractable tool calls in generated text:", extracted_calls.len());
+                    info!(
+                        "Found {} extractable tool calls in generated text:",
+                        extracted_calls.len()
+                    );
                     for call in &extracted_calls {
                         info!("  - {}: {}", call.name, call.arguments);
                     }
-                    
+
                     // This suggests the model generated tool calls but they weren't
                     // detected by the stopping criteria
                     warn!("Tool calls were generated but not automatically detected/executed");

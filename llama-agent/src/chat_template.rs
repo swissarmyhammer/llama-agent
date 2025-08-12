@@ -605,7 +605,7 @@ impl JsonToolCallParser {
         tool_calls: &mut Vec<ToolCall>,
     ) -> Result<(), TemplateError> {
         // Use a more sophisticated approach to find JSON objects that might be malformed
-        
+
         // Find potential JSON start patterns
         let start_patterns = vec![
             r#"\{\s*"function_name"\s*:"#,
@@ -615,20 +615,26 @@ impl JsonToolCallParser {
 
         for pattern_str in start_patterns {
             let pattern = Regex::new(pattern_str).unwrap();
-            
+
             for mat in pattern.find_iter(text) {
                 let start_pos = mat.start();
-                debug!("JsonToolCallParser: Found potential JSON start at position {}", start_pos);
-                
+                debug!(
+                    "JsonToolCallParser: Found potential JSON start at position {}",
+                    start_pos
+                );
+
                 // Try to find the matching closing brace using brace counting
                 let remaining_text = &text[start_pos..];
                 if let Some(json_str) = self.extract_balanced_json(remaining_text) {
                     debug!("JsonToolCallParser: Extracted balanced JSON: {}", json_str);
-                    
+
                     match serde_json::from_str::<Value>(&json_str) {
                         Ok(json) => {
                             if let Some(tool_call) = self.parse_json_tool_call(&json)? {
-                                debug!("JsonToolCallParser: Fallback extracted tool call: {:?}", tool_call);
+                                debug!(
+                                    "JsonToolCallParser: Fallback extracted tool call: {:?}",
+                                    tool_call
+                                );
                                 tool_calls.push(tool_call);
                             }
                         }
@@ -649,15 +655,15 @@ impl JsonToolCallParser {
         let mut in_string = false;
         let mut escape_next = false;
         let mut result = String::new();
-        
+
         for ch in text.chars() {
             result.push(ch);
-            
+
             if escape_next {
                 escape_next = false;
                 continue;
             }
-            
+
             match ch {
                 '\\' if in_string => {
                     escape_next = true;
@@ -678,13 +684,13 @@ impl JsonToolCallParser {
                 }
                 _ => {}
             }
-            
+
             // If we've seen many characters without closing, give up
             if result.len() > 10000 {
                 break;
             }
         }
-        
+
         None
     }
 }
@@ -913,7 +919,7 @@ mod tests {
 {"function_name": "list_directory", "arguments": {"path": "."}}
 
 I apologize for the confusion. Let me try again with the correct format."#;
-        
+
         let tool_calls = parser.parse_tool_calls(text).unwrap();
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].name, "list_directory");
@@ -943,7 +949,7 @@ I apologize for the confusion. Let me try again with the correct format."#;
         let _ = tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
             .try_init();
-            
+
         let parser = JsonToolCallParser::new();
 
         // Test malformed JSON that would need fallback parsing (missing closing brace)
@@ -1005,7 +1011,7 @@ I apologize for the confusion. Let me try again with the correct format."#;
         let _ = tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
             .try_init();
-        
+
         // This test verifies that our debug logging enhancements work
         let engine = ChatTemplateEngine::new();
 
