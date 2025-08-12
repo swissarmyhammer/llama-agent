@@ -296,14 +296,50 @@ impl MCPServer for MCPServerImpl {
             )));
         }
 
-        // We need mutable access to send requests, but this is a read-only method
-        // In a real implementation, this would be handled differently with proper state management
-        // For now, we'll return a basic implementation that can be extended
         debug!("Listing tools for MCP server: {}", self.config.name);
 
-        // This is a simplified implementation - in practice you'd need to manage the mutable state differently
-        // For now, return empty list to maintain compatibility
-        let tool_definitions = Vec::new();
+        // Send tools/list request to the server
+        let response = self.send_request("tools/list", json!({})).await?;
+
+        // Parse the response to extract tool definitions
+        let tools_array = response
+            .get("tools")
+            .and_then(|t| t.as_array())
+            .ok_or_else(|| {
+                MCPError::Protocol(
+                    "Invalid tools/list response format: missing tools array".to_string(),
+                )
+            })?;
+
+        let mut tool_definitions = Vec::new();
+        for tool_data in tools_array {
+            // Parse the tool name
+            let name = tool_data
+                .get("name")
+                .and_then(|n| n.as_str())
+                .ok_or_else(|| MCPError::Protocol("Tool missing name field".to_string()))?
+                .to_string();
+
+            // Parse the tool description
+            let description = tool_data
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Parse the input schema (optional)
+            let parameters = tool_data
+                .get("inputSchema")
+                .cloned()
+                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+            tool_definitions.push(ToolDefinition {
+                name,
+                description,
+                parameters,
+                server_name: self.config.name.clone(),
+            });
+        }
 
         debug!(
             "Found {} tools for server '{}'",

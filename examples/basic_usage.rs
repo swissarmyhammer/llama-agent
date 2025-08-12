@@ -51,6 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             args: vec![
                 "-y".to_string(),
                 "@modelcontextprotocol/server-filesystem".to_string(),
+                ".".to_string(), // Current directory
             ],
             timeout_secs: None,
         }],
@@ -69,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args: vec![
             "-y".to_string(),
             "@modelcontextprotocol/server-filesystem".to_string(),
+            ".".to_string(), // Current directory
         ],
         timeout_secs: None,
     }];

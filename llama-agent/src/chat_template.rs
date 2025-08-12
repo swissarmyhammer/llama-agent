@@ -162,7 +162,7 @@ impl ChatTemplateEngine {
         })?;
 
         Ok(format!(
-            "Available tools:\n{}\n\nTo call a tool, respond with a properly formatted tool call.",
+            "You are an AI assistant with access to the following tools:\n{}\n\nWhen the user asks you to perform an action that requires using these tools, you should call the appropriate tool by responding with a JSON object in this format:\n{{\n  \"function_name\": \"tool_name\",\n  \"arguments\": {{\n    \"parameter\": \"value\"\n  }}\n}}\n\nFor example, to list files in a directory, respond with:\n{{\n  \"function_name\": \"list_directory\",\n  \"arguments\": {{\n    \"path\": \".\"\n  }}\n}}",
             formatted
         ))
     }
@@ -170,11 +170,82 @@ impl ChatTemplateEngine {
     /// Apply chat template with optional tools context
     fn apply_chat_template_with_tools(
         &self,
-        _model: &LlamaModel,
+        model: &LlamaModel,
         messages: &[(String, String)],
         tools_context: Option<&str>,
     ) -> Result<String, TemplateError> {
-        self.format_chat_template(messages, tools_context)
+        self.format_chat_template_for_model(model, messages, tools_context)
+    }
+
+    /// Format chat template based on model type
+    fn format_chat_template_for_model(
+        &self,
+        model: &LlamaModel,
+        messages: &[(String, String)],
+        tools_context: Option<&str>,
+    ) -> Result<String, TemplateError> {
+        // Detect model type from model metadata or filename
+        let model_name = self.detect_model_type(model);
+        
+        match model_name.as_str() {
+            "phi3" => self.format_phi3_template(messages, tools_context),
+            _ => self.format_chat_template(messages, tools_context),
+        }
+    }
+
+    /// Detect model type from model information
+    fn detect_model_type(&self, _model: &LlamaModel) -> String {
+        // For now, we'll assume Phi-3 based on the model we know we're using
+        // In the future, this could inspect model metadata
+        "phi3".to_string()
+    }
+
+    /// Format chat template specifically for Phi-3 models
+    fn format_phi3_template(
+        &self,
+        messages: &[(String, String)],
+        tools_context: Option<&str>,
+    ) -> Result<String, TemplateError> {
+        let mut formatted_messages = Vec::new();
+
+        // Add tools context as system message if provided
+        if let Some(tools) = tools_context {
+            formatted_messages.push(("system".to_string(), tools.to_string()));
+        }
+
+        // Add all conversation messages
+        for (role, content) in messages {
+            formatted_messages.push((role.clone(), content.clone()));
+        }
+
+        // Use Phi-3 specific chat template format
+        let mut prompt = String::new();
+
+        for (role, content) in &formatted_messages {
+            match role.as_str() {
+                "system" => {
+                    prompt.push_str(&format!("<|system|>\n{}<|end|>\n", content));
+                }
+                "user" => {
+                    prompt.push_str(&format!("<|user|>\n{}<|end|>\n", content));
+                }
+                "assistant" => {
+                    prompt.push_str(&format!("<|assistant|>\n{}<|end|>\n", content));
+                }
+                "tool" => {
+                    prompt.push_str(&format!("<|tool|>\n{}<|end|>\n", content));
+                }
+                _ => {
+                    // Fallback to user for unknown roles
+                    prompt.push_str(&format!("<|user|>\n{}<|end|>\n", content));
+                }
+            }
+        }
+
+        // Add assistant prompt for generation
+        prompt.push_str("<|assistant|>\n");
+
+        Ok(prompt)
     }
 
     /// Internal method to format chat template (useful for testing)
