@@ -705,7 +705,9 @@ mod tests {
             }
 
             if text.is_empty() {
-                return Err(EmbeddingError::text_processing("Input text cannot be empty"));
+                return Err(EmbeddingError::text_processing(
+                    "Input text cannot be empty",
+                ));
             }
 
             if self.should_fail {
@@ -714,7 +716,10 @@ mod tests {
 
             if let Some(ref fail_text) = self.fail_on_text {
                 if text.contains(fail_text) {
-                    return Err(EmbeddingError::text_processing(format!("Mock failure for text containing '{}'", fail_text)));
+                    return Err(EmbeddingError::text_processing(format!(
+                        "Mock failure for text containing '{}'",
+                        fail_text
+                    )));
                 }
             }
 
@@ -725,7 +730,12 @@ mod tests {
                 // Create deterministic embedding based on text hash
                 let hash = md5::compute(text.as_bytes());
                 let mut embedding = vec![0.1; self.embedding_dimension];
-                for (i, byte) in hash.0.iter().take(self.embedding_dimension.min(16)).enumerate() {
+                for (i, byte) in hash
+                    .0
+                    .iter()
+                    .take(self.embedding_dimension.min(16))
+                    .enumerate()
+                {
                     embedding[i] = (*byte as f32) / 255.0;
                 }
                 embedding
@@ -985,12 +995,12 @@ mod tests {
     async fn test_batch_processor_creation_and_basic_functionality() {
         let mock_model = Arc::new(MockEmbeddingModel::new());
         let processor = TestBatchProcessor::new_mock(mock_model, 4);
-        
+
         // Test configuration
         assert_eq!(processor.config.batch_size, 4);
         assert!(processor.config.continue_on_error);
         assert_eq!(processor.config.max_parallel_tasks, 4);
-        
+
         // Test initial stats
         assert_eq!(processor.stats.total_texts, 0);
         assert_eq!(processor.stats.successful_embeddings, 0);
@@ -1001,20 +1011,20 @@ mod tests {
     async fn test_batch_processor_single_batch_success() {
         let mock_model = Arc::new(MockEmbeddingModel::new());
         let mut processor = TestBatchProcessor::new_mock(mock_model, 4);
-        
+
         let texts = vec![
             "Hello world".to_string(),
             "This is a test".to_string(),
             "Batch processing".to_string(),
         ];
-        
+
         let results = processor.process_batch(&texts).await.unwrap();
-        
+
         assert_eq!(results.len(), 3);
         assert_eq!(processor.stats.total_texts, 3);
         assert_eq!(processor.stats.successful_embeddings, 3);
         assert_eq!(processor.stats.failed_embeddings, 0);
-        
+
         // Verify each result
         for (i, result) in results.iter().enumerate() {
             assert_eq!(result.text, texts[i]);
@@ -1028,33 +1038,38 @@ mod tests {
     async fn test_batch_processor_model_not_loaded() {
         let mock_model = Arc::new(MockEmbeddingModel::not_loaded());
         let mut processor = TestBatchProcessor::new_mock(mock_model, 4);
-        
+
         let texts = vec!["Hello world".to_string()];
         let result = processor.process_batch(&texts).await;
-        
+
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), EmbeddingError::ModelNotLoaded));
+        assert!(matches!(
+            result.unwrap_err(),
+            EmbeddingError::ModelNotLoaded
+        ));
     }
 
     #[tokio::test]
     async fn test_batch_processor_continue_on_error() {
-        let mock_model = Arc::new(MockEmbeddingModel::with_selective_failure("fail".to_string()));
+        let mock_model = Arc::new(MockEmbeddingModel::with_selective_failure(
+            "fail".to_string(),
+        ));
         let mut processor = TestBatchProcessor::new_mock(mock_model, 4);
-        
+
         let texts = vec![
             "Hello world".to_string(),
             "This will fail".to_string(), // Contains "fail"
             "This is fine".to_string(),
             "Another fail here".to_string(), // Contains "fail"
         ];
-        
+
         let results = processor.process_batch(&texts).await.unwrap();
-        
+
         // Should get 2 successful results (skipping the 2 that failed)
         assert_eq!(results.len(), 2);
         assert_eq!(processor.stats.successful_embeddings, 2);
         assert_eq!(processor.stats.failed_embeddings, 2);
-        
+
         // Check that successful results are correct
         assert_eq!(results[0].text, "Hello world");
         assert_eq!(results[1].text, "This is fine");
@@ -1062,7 +1077,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_batch_processor_stop_on_error() {
-        let mock_model = Arc::new(MockEmbeddingModel::with_selective_failure("fail".to_string()));
+        let mock_model = Arc::new(MockEmbeddingModel::with_selective_failure(
+            "fail".to_string(),
+        ));
         let config = BatchConfig {
             batch_size: 4,
             continue_on_error: false, // Stop on first error
@@ -1073,28 +1090,31 @@ mod tests {
             enable_memory_monitoring: true,
         };
         let mut processor = TestBatchProcessor::with_config_mock(mock_model, config);
-        
+
         let texts = vec![
             "Hello world".to_string(),
             "This will fail".to_string(), // Contains "fail" - should stop here
             "This won't be processed".to_string(),
         ];
-        
+
         let result = processor.process_batch(&texts).await;
-        
+
         // Should fail on the second text
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), EmbeddingError::TextProcessing(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            EmbeddingError::TextProcessing(_)
+        ));
     }
 
     #[tokio::test]
     async fn test_batch_processor_empty_input() {
         let mock_model = Arc::new(MockEmbeddingModel::new());
         let mut processor = TestBatchProcessor::new_mock(mock_model, 4);
-        
+
         let texts: Vec<String> = vec![];
         let results = processor.process_texts(texts).await.unwrap();
-        
+
         assert!(results.is_empty());
         assert_eq!(processor.stats.total_texts, 0);
     }
@@ -1103,15 +1123,15 @@ mod tests {
     async fn test_batch_processor_large_batch_chunking() {
         let mock_model = Arc::new(MockEmbeddingModel::new());
         let mut processor = TestBatchProcessor::new_mock(mock_model, 3); // Small batch size
-        
+
         let texts: Vec<String> = (0..10).map(|i| format!("Text number {}", i)).collect();
         let results = processor.process_texts(texts.clone()).await.unwrap();
-        
+
         assert_eq!(results.len(), 10);
         assert_eq!(processor.stats.total_texts, 10);
         assert_eq!(processor.stats.successful_embeddings, 10);
         assert_eq!(processor.stats.batches_processed, 4); // 10 texts / 3 batch size = 4 batches (3+3+3+1)
-        
+
         // Verify all texts were processed correctly
         for (i, result) in results.iter().enumerate() {
             assert_eq!(result.text, texts[i]);
@@ -1131,22 +1151,25 @@ mod tests {
             enable_memory_monitoring: true,
         };
         let mut processor = TestBatchProcessor::with_config_mock(mock_model, config);
-        
+
         // Create a large text that should exceed memory limit
         let large_text = "x".repeat(10_000_000); // 10MB of text
         let texts = vec![large_text];
-        
+
         let result = processor.process_batch(&texts).await;
-        
+
         // Should fail due to memory limit
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), EmbeddingError::BatchProcessing(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            EmbeddingError::BatchProcessing(_)
+        ));
     }
 
     #[tokio::test]
     async fn test_batch_processor_progress_callback() {
         use std::sync::Mutex;
-        
+
         let mock_model = Arc::new(MockEmbeddingModel::new());
         let config = BatchConfig {
             batch_size: 2,
@@ -1158,24 +1181,27 @@ mod tests {
             enable_memory_monitoring: true,
         };
         let mut processor = TestBatchProcessor::with_config_mock(mock_model, config);
-        
+
         // Collect progress reports
         let progress_reports = Arc::new(Mutex::new(Vec::new()));
         let progress_reports_clone = progress_reports.clone();
-        
+
         processor.set_progress_callback(Box::new(move |progress| {
-            progress_reports_clone.lock().unwrap().push(progress.clone());
+            progress_reports_clone
+                .lock()
+                .unwrap()
+                .push(progress.clone());
         }));
-        
+
         let texts: Vec<String> = (0..5).map(|i| format!("Text {}", i)).collect();
         let results = processor.process_texts(texts).await.unwrap();
-        
+
         assert_eq!(results.len(), 5);
-        
+
         // Check that progress was reported
         let reports = progress_reports.lock().unwrap();
         assert!(!reports.is_empty());
-        
+
         // Verify progress report structure
         for report in reports.iter() {
             assert!(report.current_batch > 0);
@@ -1198,7 +1224,7 @@ mod tests {
             enable_memory_monitoring: false,
         };
         let processor = TestBatchProcessor::with_config_mock(mock_model, config);
-        
+
         // Verify configuration was applied correctly
         assert_eq!(processor.config.batch_size, 8);
         assert!(!processor.config.continue_on_error);
@@ -1214,15 +1240,15 @@ mod tests {
         let mock_model = Arc::new(MockEmbeddingModel::new());
         let mut processor1 = TestBatchProcessor::new_mock(mock_model.clone(), 4);
         let mut processor2 = TestBatchProcessor::new_mock(mock_model, 4);
-        
+
         let texts = vec![
             "Consistent text 1".to_string(),
             "Consistent text 2".to_string(),
         ];
-        
+
         let results1 = processor1.process_batch(&texts).await.unwrap();
         let results2 = processor2.process_batch(&texts).await.unwrap();
-        
+
         // Results should be identical for same inputs
         assert_eq!(results1.len(), results2.len());
         for (r1, r2) in results1.iter().zip(results2.iter()) {
@@ -1237,22 +1263,22 @@ mod tests {
     async fn test_batch_processor_edge_cases() {
         let mock_model = Arc::new(MockEmbeddingModel::new());
         let mut processor = TestBatchProcessor::new_mock(mock_model, 4);
-        
+
         // Test with various edge case inputs
         let texts = vec![
-            "a".to_string(),                    // Single character
-            "word".to_string(),                 // Single word
-            "Multiple words here".to_string(),  // Multiple words
+            "a".to_string(),                         // Single character
+            "word".to_string(),                      // Single word
+            "Multiple words here".to_string(),       // Multiple words
             "Special chars: !@#$%^&*()".to_string(), // Special characters
             "Numbers 12345 and symbols".to_string(), // Mixed content
         ];
-        
+
         let results = processor.process_batch(&texts).await.unwrap();
-        
+
         assert_eq!(results.len(), 5);
         assert_eq!(processor.stats.successful_embeddings, 5);
         assert_eq!(processor.stats.failed_embeddings, 0);
-        
+
         // Verify all results are valid
         for (i, result) in results.iter().enumerate() {
             assert_eq!(result.text, texts[i]);
@@ -1260,7 +1286,7 @@ mod tests {
             assert!(result.sequence_length > 0);
             assert!(result.processing_time_ms > 0);
             assert!(!result.text_hash.is_empty());
-            
+
             // Verify embedding is not all zeros (deterministic but not trivial)
             assert!(result.embedding.iter().any(|&x| x != 0.0));
         }
