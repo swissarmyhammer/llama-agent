@@ -6,10 +6,14 @@ use llama_cpp_2::{
     model::LlamaModel,
     send_logs_to_tracing, LogOptions,
 };
+
+// High-level llama-cpp-2 types for embedding processing
+use llama_cpp_2::llama_batch::LlamaBatch;
+use llama_cpp_2::token::LlamaToken;
 use llama_loader::{ModelConfig, ModelLoader, ModelMetadata, RetryConfig};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 // Need access to raw FFI bindings for llama_log_set
 use std::ffi::c_void;
 use std::os::raw::c_char;
@@ -137,7 +141,7 @@ impl EmbeddingModel {
         debug!("Generating embedding for text: {} chars", text.len());
 
         // Create context for this embedding operation
-        let context = self.create_context(model)?;
+        let mut context = self.create_context(model)?;
 
         // Tokenize the text
         let tokens = self.tokenize_text(&context, text)?;
@@ -155,7 +159,7 @@ impl EmbeddingModel {
         };
 
         // Generate embedding using the tokenized text
-        let embedding = self.generate_embedding_from_tokens(&context, &final_tokens)?;
+        let embedding = self.generate_embedding_from_tokens(&mut context, &final_tokens)?;
 
         let processing_time_ms = start_time.elapsed().as_millis() as u64;
 
@@ -183,12 +187,14 @@ impl EmbeddingModel {
 
     /// Get the embedding dimension of the loaded model
     pub fn get_embedding_dimension(&self) -> Option<usize> {
-        self.model.as_ref().map(|_model| {
-            // Try to determine embedding dimension from model
-            // This might require calling a specific API method
-            // For now, we'll use a common default and update this
-            // once we can test with actual embedding models
-            384 // Qwen3-Embedding-0.6B typically has 384 dimensions
+        self.model.as_ref().map(|model| {
+            let n_embd = model.n_embd();
+            if n_embd > 0 {
+                n_embd as usize
+            } else {
+                // Fallback to common default if API returns invalid value
+                384
+            }
         })
     }
 
@@ -222,7 +228,7 @@ impl EmbeddingModel {
     }
 
     fn create_context<'a>(&self, model: &'a LlamaModel) -> Result<LlamaContext<'a>> {
-        let context_params = LlamaContextParams::default();
+        let context_params = LlamaContextParams::default().with_embeddings(true);
 
         model
             .new_context(&self.backend, context_params)
@@ -257,7 +263,7 @@ impl EmbeddingModel {
 
     fn generate_embedding_from_tokens(
         &self,
-        _context: &LlamaContext,
+        context: &mut LlamaContext,
         tokens: &[i32],
     ) -> Result<Vec<f32>> {
         if tokens.is_empty() {
@@ -266,29 +272,60 @@ impl EmbeddingModel {
             ));
         }
 
-        // Note: This is a simplified implementation
-        // The actual embedding extraction would depend on the specific
-        // llama-cpp-2 API for embeddings. We need to either:
-        // 1. Find the proper embedding extraction method in llama-cpp-2
-        // 2. Use the context to run inference and extract hidden states
-        // 3. Use a different approach based on the actual API
+        // Get embedding dimension from the model
+        let embedding_dim = self.get_embedding_dimension().ok_or_else(|| {
+            EmbeddingError::model("Could not determine embedding dimension".to_string())
+        })?;
 
-        // For now, this is a placeholder that creates a dummy embedding
-        // This should be replaced with the actual embedding extraction code
-        warn!("Using placeholder embedding generation - needs actual implementation");
+        // Convert i32 tokens to LlamaToken
+        let llama_tokens: Vec<LlamaToken> = tokens.iter().map(|&t| LlamaToken(t)).collect();
 
-        // Return a placeholder embedding vector
-        let embedding_dim = self.get_embedding_dimension().unwrap_or(384);
-        let embedding = vec![0.1; embedding_dim]; // Placeholder values
+        // Create a batch for the tokens
+        // We need enough space for all tokens and use one sequence
+        let mut batch = LlamaBatch::new(tokens.len(), 1);
 
-        Ok(embedding)
+        // Add the token sequence to the batch
+        // Set logits to true for the last token to get embeddings
+        batch.add_sequence(&llama_tokens, 0, false).map_err(|e| {
+            EmbeddingError::text_processing(format!("Failed to add tokens to batch: {}", e))
+        })?;
+
+        // Decode the tokens to generate embeddings
+        context.decode(&mut batch).map_err(|e| {
+            EmbeddingError::text_processing(format!(
+                "Failed to decode tokens for embedding extraction: {}",
+                e
+            ))
+        })?;
+
+        // Extract embeddings for the sequence
+        // Use sequence 0 since we only have one sequence
+        let embeddings = context.embeddings_seq_ith(0).map_err(|e| {
+            EmbeddingError::text_processing(format!(
+                "Failed to extract embeddings from context: {}",
+                e
+            ))
+        })?;
+
+        // Validate embedding dimension matches expectation
+        if embeddings.len() != embedding_dim {
+            return Err(EmbeddingError::text_processing(format!(
+                "Embedding dimension mismatch: expected {}, got {}",
+                embedding_dim,
+                embeddings.len()
+            )));
+        }
+
+        debug!(
+            "Successfully extracted embedding of dimension {} for {} tokens",
+            embedding_dim,
+            tokens.len()
+        );
+
+        // Convert from slice to owned vector
+        Ok(embeddings.to_vec())
     }
 }
-
-// Note: We'll need to implement the actual embedding extraction
-// once we can test with real embedding models and understand
-// the llama-cpp-2 API better. The current implementation
-// provides the structure but uses placeholder embedding generation.
 
 #[cfg(test)]
 mod tests {
