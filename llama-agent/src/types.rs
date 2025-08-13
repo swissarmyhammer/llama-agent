@@ -540,6 +540,7 @@ pub struct AgentConfig {
     pub queue_config: QueueConfig,
     pub mcp_servers: Vec<MCPServerConfig>,
     pub session_config: SessionConfig,
+    pub parallel_execution_config: ParallelExecutionConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
