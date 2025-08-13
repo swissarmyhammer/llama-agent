@@ -46,7 +46,7 @@ pub fn validate_embed_args(args: &EmbedArgs) -> anyhow::Result<()> {
     // 2. Validate input file
     validate_input_file(&args.input)?;
 
-    // 3. Validate output path  
+    // 3. Validate output path
     validate_output_path(&args.output)?;
 
     // 4. Validate parameters
