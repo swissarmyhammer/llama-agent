@@ -85,6 +85,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 num_cpus = { workspace = true }
 anyhow = { workspace = true }
+polars = { workspace = true }
 
 # Performance optimized release profile
 [profile.release]

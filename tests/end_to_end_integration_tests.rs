@@ -119,16 +119,144 @@ impl EndToEndTestHelper {
             ));
         }
 
-        // TODO: Add actual Parquet reading to validate schema and content
-        // This would require adding parquet/arrow dependencies to this test
-        // For now, we validate basic file properties
+        // Read and validate the actual Parquet file
+        use polars::prelude::*;
+
+        // Read the Parquet file
+        let df = LazyFrame::scan_parquet(path, ScanArgsParquet::default())
+            .map_err(|e| anyhow::anyhow!("Failed to read Parquet file: {}", e))?
+            .collect()
+            .map_err(|e| anyhow::anyhow!("Failed to collect Parquet data: {}", e))?;
+
+        // Validate schema structure
+        let expected_columns = [
+            "text",
+            "text_hash",
+            "sequence_length",
+            "processing_time_ms",
+            "embedding",
+        ];
+        let actual_columns = df.get_column_names();
+
+        for expected_col in &expected_columns {
+            if !actual_columns.contains(expected_col) {
+                return Err(anyhow::anyhow!(
+                    "Missing required column '{}' in Parquet schema. Found columns: {:?}",
+                    expected_col,
+                    actual_columns
+                ));
+            }
+        }
+
+        // Get actual record count
+        let actual_records = df.height();
+
+        // Validate record count matches expected
+        if actual_records != expected_texts.len() {
+            return Err(anyhow::anyhow!(
+                "Record count mismatch: expected {} records, found {} records",
+                expected_texts.len(),
+                actual_records
+            ));
+        }
+
+        // Validate text content matches expected inputs
+        let text_column = df
+            .column("text")
+            .map_err(|e| anyhow::anyhow!("Failed to get text column: {}", e))?;
+
+        let text_values: Vec<String> = text_column
+            .str()
+            .map_err(|e| anyhow::anyhow!("Text column is not string type: {}", e))?
+            .into_iter()
+            .map(|opt_str| opt_str.unwrap_or("").to_string())
+            .collect();
+
+        // Check that all expected texts are present (order might differ)
+        for expected_text in expected_texts {
+            if !text_values.contains(&expected_text.to_string()) {
+                return Err(anyhow::anyhow!(
+                    "Expected text '{}' not found in Parquet file",
+                    expected_text
+                ));
+            }
+        }
+
+        // Validate embedding dimensions are consistent
+        let embedding_column = df
+            .column("embedding")
+            .map_err(|e| anyhow::anyhow!("Failed to get embedding column: {}", e))?;
+
+        // Check that all embeddings have the same dimension
+        let mut embedding_dim: Option<usize> = None;
+
+        match embedding_column.dtype() {
+            DataType::List(_) => {
+                let list_chunked = embedding_column
+                    .list()
+                    .map_err(|e| anyhow::anyhow!("Embedding column is not list type: {}", e))?;
+
+                for (i, opt_series) in list_chunked.into_iter().enumerate() {
+                    if let Some(series) = opt_series {
+                        let len = series.len();
+                        if let Some(expected_dim) = embedding_dim {
+                            if len != expected_dim {
+                                return Err(anyhow::anyhow!(
+                                    "Embedding dimension inconsistency at record {}: expected {} dimensions, got {} dimensions",
+                                    i, expected_dim, len
+                                ));
+                            }
+                        } else {
+                            embedding_dim = Some(len);
+                        }
+
+                        // Check that embedding values are valid floats and optionally normalized
+                        if let Ok(float_chunked) = series.f32() {
+                            let values: Vec<f32> = float_chunked.into_iter().flatten().collect();
+
+                            // Check for invalid values (NaN, infinite)
+                            for (j, &value) in values.iter().enumerate() {
+                                if !value.is_finite() {
+                                    return Err(anyhow::anyhow!(
+                                        "Invalid embedding value at record {}, dimension {}: {}",
+                                        i,
+                                        j,
+                                        value
+                                    ));
+                                }
+                            }
+
+                            // If normalized, check that the L2 norm is approximately 1.0
+                            if normalized {
+                                let norm_squared: f32 = values.iter().map(|&x| x * x).sum();
+                                let norm = norm_squared.sqrt();
+
+                                // Allow some tolerance for floating point precision
+                                if (norm - 1.0).abs() > 0.01 {
+                                    return Err(anyhow::anyhow!(
+                                        "Embedding at record {} not properly normalized: L2 norm = {}, expected ~1.0",
+                                        i, norm
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Embedding column has unexpected type: {:?}, expected List",
+                    embedding_column.dtype()
+                ));
+            }
+        }
 
         Ok(ParquetValidationResult {
             file_exists: true,
             file_size_bytes: file_size,
             expected_records: expected_texts.len(),
-            actual_records: None, // Would be populated with real Parquet reading
-            schema_valid: true,   // Would be validated with real Parquet reading
+            actual_records: Some(actual_records),
+            schema_valid: true,
             embeddings_normalized: normalized,
         })
     }
