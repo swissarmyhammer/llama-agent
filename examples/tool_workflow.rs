@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 repo: "microsoft/Phi-3-mini-4k-instruct-gguf".to_string(),
                 filename: Some("Phi-3-mini-4k-instruct-q4.gguf".to_string()),
             },
-            batch_size: 512,
+            batch_size: 4096,
             use_hf_params: true,
             retry_config: RetryConfig::default(),
             debug: false,
