@@ -1,4 +1,5 @@
 use crate::chat_template::ChatTemplateEngine;
+use crate::dependency_analysis::{DependencyAnalyzer, ParallelExecutionDecision};
 use crate::mcp::MCPClient;
 use crate::model::ModelManager;
 use crate::queue::RequestQueue;
@@ -21,6 +22,7 @@ pub struct AgentServer {
     session_manager: Arc<SessionManager>,
     mcp_client: Arc<MCPClient>,
     chat_template: Arc<ChatTemplateEngine>,
+    dependency_analyzer: Arc<DependencyAnalyzer>,
     config: AgentConfig,
     start_time: Instant,
     shutdown_token: tokio_util::sync::CancellationToken,
@@ -42,6 +44,7 @@ impl AgentServer {
         session_manager: Arc<SessionManager>,
         mcp_client: Arc<MCPClient>,
         chat_template: Arc<ChatTemplateEngine>,
+        dependency_analyzer: Arc<DependencyAnalyzer>,
         config: AgentConfig,
     ) -> Self {
         Self {
@@ -50,6 +53,7 @@ impl AgentServer {
             session_manager,
             mcp_client,
             chat_template,
+            dependency_analyzer,
             config,
             start_time: Instant::now(),
             shutdown_token: tokio_util::sync::CancellationToken::new(),
@@ -136,30 +140,29 @@ impl AgentServer {
         Ok(())
     }
 
-    /// Determine if tool calls should be executed in parallel
+    /// Determine if tool calls should be executed in parallel using sophisticated dependency analysis
     fn should_execute_in_parallel(&self, tool_calls: &[ToolCall]) -> bool {
-        // Simple heuristic: execute in parallel if there are multiple calls
-        // and they don't appear to be interdependent
+        debug!(
+            "Analyzing {} tool calls for parallel execution using dependency analysis",
+            tool_calls.len()
+        );
 
-        // For now, enable parallel execution for most cases
-        // TODO: Add more sophisticated dependency analysis
-        if tool_calls.len() <= 1 {
-            return false;
-        }
-
-        // Check for potential dependencies by looking for similar tool names
-        // that might modify the same resources
-        let mut tool_names = std::collections::HashSet::new();
-        for tool_call in tool_calls {
-            // If we have duplicate tool names, they might be interdependent
-            if !tool_names.insert(&tool_call.name) {
-                debug!("Detected duplicate tool names, using sequential execution for safety");
-                return false;
+        match self
+            .dependency_analyzer
+            .analyze_parallel_execution(tool_calls)
+        {
+            ParallelExecutionDecision::Parallel => {
+                debug!("Dependency analysis result: PARALLEL execution approved");
+                true
+            }
+            ParallelExecutionDecision::Sequential(reason) => {
+                debug!(
+                    "Dependency analysis result: SEQUENTIAL execution required - {}",
+                    reason
+                );
+                false
             }
         }
-
-        debug!("No obvious dependencies detected, enabling parallel execution");
-        true
     }
 
     /// Execute multiple tool calls in parallel
@@ -589,12 +592,19 @@ impl AgentAPI for AgentServer {
         let chat_template = Arc::new(ChatTemplateEngine::new());
         info!("Chat template engine initialized");
 
+        // Initialize dependency analyzer with configured settings
+        let dependency_analyzer = Arc::new(DependencyAnalyzer::new(
+            config.parallel_execution_config.clone(),
+        ));
+        info!("Dependency analyzer initialized with configuration");
+
         let agent_server = Self::new(
             model_manager,
             request_queue,
             session_manager,
             mcp_client,
             chat_template,
+            dependency_analyzer,
             config,
         );
 
@@ -1069,7 +1079,9 @@ impl AgentAPI for AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ModelConfig, ModelSource, QueueConfig, RetryConfig, SessionConfig};
+    use crate::types::{
+        ModelConfig, ModelSource, ParallelExecutionConfig, QueueConfig, RetryConfig, SessionConfig,
+    };
 
     fn create_test_config() -> AgentConfig {
         use tempfile::TempDir;
@@ -1089,6 +1101,7 @@ mod tests {
             queue_config: QueueConfig::default(),
             mcp_servers: Vec::new(),
             session_config: SessionConfig::default(),
+            parallel_execution_config: ParallelExecutionConfig::default(),
         }
     }
 
@@ -1159,6 +1172,7 @@ mod tests {
             queue_config: QueueConfig::default(),
             mcp_servers: Vec::new(),
             session_config: SessionConfig::default(),
+            parallel_execution_config: ParallelExecutionConfig::default(),
         };
 
         // This should pass all validation except for the model file not existing
