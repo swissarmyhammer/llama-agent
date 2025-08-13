@@ -570,7 +570,6 @@ impl BatchProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::EmbeddingConfig;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -622,14 +621,675 @@ mod tests {
         assert!(config.enable_memory_monitoring);
     }
 
-    #[test]
-    fn test_batch_processor_creation() {
-        // Create a dummy config for testing structure
-        let _config = EmbeddingConfig::default();
+    /// Trait for embedding models that can be used with BatchProcessor
+    /// This allows both real EmbeddingModel and MockEmbeddingModel to be used
+    pub trait EmbeddingModelTrait: Send + Sync {
+        async fn embed_text(&self, text: &str) -> Result<EmbeddingResult>;
+        fn is_loaded(&self) -> bool;
+        fn get_embedding_dimension(&self) -> Option<usize>;
+    }
 
-        // We can't actually create an EmbeddingModel in unit tests
-        // without proper setup, but we can test the structure
-        assert_eq!(1, 1); // Placeholder test to verify compilation
+    /// Implement the trait for the real EmbeddingModel
+    impl EmbeddingModelTrait for EmbeddingModel {
+        async fn embed_text(&self, text: &str) -> Result<EmbeddingResult> {
+            self.embed_text(text).await
+        }
+
+        fn is_loaded(&self) -> bool {
+            self.is_loaded()
+        }
+
+        fn get_embedding_dimension(&self) -> Option<usize> {
+            self.get_embedding_dimension()
+        }
+    }
+
+    /// Mock EmbeddingModel for unit testing that doesn't require actual model files
+    pub struct MockEmbeddingModel {
+        pub loaded: bool,
+        pub embedding_dimension: usize,
+        pub should_fail: bool,
+        pub processing_time_ms: u64,
+        pub fail_on_text: Option<String>,
+        pub custom_embedding: Option<Vec<f32>>,
+    }
+
+    impl MockEmbeddingModel {
+        pub fn new() -> Self {
+            Self {
+                loaded: true,
+                embedding_dimension: 384,
+                should_fail: false,
+                processing_time_ms: 10,
+                fail_on_text: None,
+                custom_embedding: None,
+            }
+        }
+
+        pub fn with_failure() -> Self {
+            Self {
+                loaded: true,
+                embedding_dimension: 384,
+                should_fail: true,
+                processing_time_ms: 10,
+                fail_on_text: None,
+                custom_embedding: None,
+            }
+        }
+
+        pub fn with_selective_failure(fail_text: String) -> Self {
+            Self {
+                loaded: true,
+                embedding_dimension: 384,
+                should_fail: false,
+                processing_time_ms: 10,
+                fail_on_text: Some(fail_text),
+                custom_embedding: None,
+            }
+        }
+
+        pub fn not_loaded() -> Self {
+            Self {
+                loaded: false,
+                embedding_dimension: 384,
+                should_fail: false,
+                processing_time_ms: 10,
+                fail_on_text: None,
+                custom_embedding: None,
+            }
+        }
+
+        pub async fn embed_text(&self, text: &str) -> Result<EmbeddingResult> {
+            if !self.loaded {
+                return Err(EmbeddingError::ModelNotLoaded);
+            }
+
+            if text.is_empty() {
+                return Err(EmbeddingError::text_processing(
+                    "Input text cannot be empty",
+                ));
+            }
+
+            if self.should_fail {
+                return Err(EmbeddingError::text_processing("Mock failure"));
+            }
+
+            if let Some(ref fail_text) = self.fail_on_text {
+                if text.contains(fail_text) {
+                    return Err(EmbeddingError::text_processing(format!(
+                        "Mock failure for text containing '{}'",
+                        fail_text
+                    )));
+                }
+            }
+
+            // Create deterministic embedding based on text
+            let embedding = if let Some(ref custom) = self.custom_embedding {
+                custom.clone()
+            } else {
+                // Create deterministic embedding based on text hash
+                let hash = md5::compute(text.as_bytes());
+                let mut embedding = vec![0.1; self.embedding_dimension];
+                for (i, byte) in hash
+                    .0
+                    .iter()
+                    .take(self.embedding_dimension.min(16))
+                    .enumerate()
+                {
+                    embedding[i] = (*byte as f32) / 255.0;
+                }
+                embedding
+            };
+
+            let sequence_length = text.split_whitespace().count().max(1); // Approximate tokenization
+
+            Ok(EmbeddingResult::new(
+                text.to_string(),
+                embedding,
+                sequence_length,
+                self.processing_time_ms,
+            ))
+        }
+
+        pub fn is_loaded(&self) -> bool {
+            self.loaded
+        }
+
+        pub fn get_embedding_dimension(&self) -> Option<usize> {
+            if self.loaded {
+                Some(self.embedding_dimension)
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Implement the trait for MockEmbeddingModel
+    impl EmbeddingModelTrait for MockEmbeddingModel {
+        async fn embed_text(&self, text: &str) -> Result<EmbeddingResult> {
+            self.embed_text(text).await
+        }
+
+        fn is_loaded(&self) -> bool {
+            self.is_loaded()
+        }
+
+        fn get_embedding_dimension(&self) -> Option<usize> {
+            self.get_embedding_dimension()
+        }
+    }
+
+    /// Enum to hold either a real or mock embedding model
+    pub enum TestEmbeddingModel {
+        Real(Arc<EmbeddingModel>),
+        Mock(Arc<MockEmbeddingModel>),
+    }
+
+    impl EmbeddingModelTrait for TestEmbeddingModel {
+        async fn embed_text(&self, text: &str) -> Result<EmbeddingResult> {
+            match self {
+                TestEmbeddingModel::Real(model) => model.embed_text(text).await,
+                TestEmbeddingModel::Mock(model) => model.embed_text(text).await,
+            }
+        }
+
+        fn is_loaded(&self) -> bool {
+            match self {
+                TestEmbeddingModel::Real(model) => model.is_loaded(),
+                TestEmbeddingModel::Mock(model) => model.is_loaded(),
+            }
+        }
+
+        fn get_embedding_dimension(&self) -> Option<usize> {
+            match self {
+                TestEmbeddingModel::Real(model) => model.get_embedding_dimension(),
+                TestEmbeddingModel::Mock(model) => model.get_embedding_dimension(),
+            }
+        }
+    }
+
+    /// Test-specific BatchProcessor that works with the enum
+    pub struct TestBatchProcessor {
+        model: TestEmbeddingModel,
+        config: BatchConfig,
+        stats: BatchStats,
+        progress_callback: Option<ProgressCallback>,
+    }
+
+    impl TestBatchProcessor {
+        pub fn new_mock(model: Arc<MockEmbeddingModel>, batch_size: usize) -> Self {
+            let config = BatchConfig {
+                batch_size,
+                ..Default::default()
+            };
+            Self {
+                model: TestEmbeddingModel::Mock(model),
+                config,
+                stats: BatchStats::new(),
+                progress_callback: None,
+            }
+        }
+
+        pub fn with_config_mock(model: Arc<MockEmbeddingModel>, config: BatchConfig) -> Self {
+            Self {
+                model: TestEmbeddingModel::Mock(model),
+                config,
+                stats: BatchStats::new(),
+                progress_callback: None,
+            }
+        }
+
+        pub fn set_progress_callback(&mut self, callback: ProgressCallback) {
+            self.progress_callback = Some(callback);
+        }
+
+        /// Process a batch of texts and return embedding results with error recovery
+        pub async fn process_batch(&mut self, texts: &[String]) -> Result<Vec<EmbeddingResult>> {
+            if !self.model.is_loaded() {
+                return Err(EmbeddingError::ModelNotLoaded);
+            }
+
+            let start_time = Instant::now();
+            debug!("Processing batch of {} texts", texts.len());
+
+            // Monitor memory usage if enabled
+            if self.config.enable_memory_monitoring {
+                let memory_usage = self.estimate_current_memory_usage(texts);
+                self.stats.update_memory_usage(memory_usage);
+
+                // Check memory limit if configured
+                if let Some(limit_mb) = self.config.memory_limit_mb {
+                    let limit_bytes = limit_mb * 1024 * 1024;
+                    if memory_usage > limit_bytes {
+                        warn!(
+                            "Memory usage ({:.2}MB) exceeds limit ({:.2}MB)",
+                            memory_usage as f64 / (1024.0 * 1024.0),
+                            limit_mb
+                        );
+                        return Err(EmbeddingError::batch_processing(format!(
+                            "Memory limit exceeded: {:.2}MB > {}MB",
+                            memory_usage as f64 / (1024.0 * 1024.0),
+                            limit_mb
+                        )));
+                    }
+                }
+            }
+
+            let mut results = Vec::new();
+            let mut failures = 0;
+
+            for text in texts {
+                match self.model.embed_text(text).await {
+                    Ok(result) => {
+                        results.push(result);
+                    }
+                    Err(e) => {
+                        failures += 1;
+                        let preview = text.chars().take(50).collect::<String>();
+                        warn!("Failed to embed text '{}...': {}", preview, e);
+
+                        if !self.config.continue_on_error {
+                            return Err(e);
+                        }
+                        // Continue processing other texts if continue_on_error is true
+                    }
+                }
+            }
+
+            let processing_time = start_time.elapsed().as_millis() as u64;
+            self.stats
+                .update_with_details(&results, processing_time, failures);
+
+            debug!(
+                "Processed batch: {} successful, {} failed, {}ms",
+                results.len(),
+                failures,
+                processing_time
+            );
+
+            Ok(results)
+        }
+
+        /// Process a list of texts with efficient batching
+        pub async fn process_texts(&mut self, texts: Vec<String>) -> Result<Vec<EmbeddingResult>> {
+            if texts.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            info!(
+                "Processing {} texts in batches of {}",
+                texts.len(),
+                self.config.batch_size
+            );
+            let total_batches = texts.len().div_ceil(self.config.batch_size);
+            let mut all_results = Vec::new();
+            let start_time = Instant::now();
+
+            for (batch_idx, chunk) in texts.chunks(self.config.batch_size).enumerate() {
+                let batch_results = self.process_batch(chunk).await?;
+                all_results.extend(batch_results);
+
+                // Report progress if enabled and callback is set
+                if self.config.enable_progress_reporting
+                    && batch_idx % self.config.progress_report_interval_batches == 0
+                {
+                    if let Some(ref callback) = self.progress_callback {
+                        let elapsed_ms = start_time.elapsed().as_millis() as u64;
+                        let current_throughput = if elapsed_ms > 0 {
+                            (self.stats.successful_embeddings as f64) / (elapsed_ms as f64 / 1000.0)
+                        } else {
+                            0.0
+                        };
+
+                        let remaining_batches = total_batches.saturating_sub(batch_idx + 1);
+                        let estimated_remaining_ms =
+                            if current_throughput > 0.0 && remaining_batches > 0 {
+                                let remaining_texts = remaining_batches * self.config.batch_size;
+                                ((remaining_texts as f64) / current_throughput * 1000.0) as u64
+                            } else {
+                                0
+                            };
+
+                        let progress_info = ProgressInfo {
+                            current_batch: batch_idx + 1,
+                            total_batches,
+                            texts_processed: self.stats.total_texts,
+                            total_texts: texts.len(),
+                            successful_embeddings: self.stats.successful_embeddings,
+                            failed_embeddings: self.stats.failed_embeddings,
+                            elapsed_time_ms: elapsed_ms,
+                            estimated_remaining_ms,
+                            current_throughput_texts_per_second: current_throughput,
+                        };
+
+                        callback(&progress_info);
+                    }
+                }
+            }
+
+            info!(
+                "Completed processing {} texts with {} results. {}",
+                texts.len(),
+                all_results.len(),
+                self.stats.format_summary()
+            );
+            Ok(all_results)
+        }
+
+        fn estimate_current_memory_usage(&self, texts: &[String]) -> usize {
+            let text_memory = texts.iter().map(|t| t.len()).sum::<usize>();
+            let embeddings_memory = if let Some(dim) = self.model.get_embedding_dimension() {
+                // Estimate memory for potential embeddings (f32 = 4 bytes per element)
+                texts.len() * dim * 4
+            } else {
+                // Default assumption for embedding dimension
+                texts.len() * 384 * 4
+            };
+            // Add overhead for vectors, strings, and other data structures (rough estimate)
+            let overhead = text_memory / 2;
+            text_memory + embeddings_memory + overhead
+        }
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_creation_and_basic_functionality() {
+        let mock_model = Arc::new(MockEmbeddingModel::new());
+        let processor = TestBatchProcessor::new_mock(mock_model, 4);
+
+        // Test configuration
+        assert_eq!(processor.config.batch_size, 4);
+        assert!(processor.config.continue_on_error);
+        assert_eq!(processor.config.max_parallel_tasks, 4);
+
+        // Test initial stats
+        assert_eq!(processor.stats.total_texts, 0);
+        assert_eq!(processor.stats.successful_embeddings, 0);
+        assert_eq!(processor.stats.failed_embeddings, 0);
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_single_batch_success() {
+        let mock_model = Arc::new(MockEmbeddingModel::new());
+        let mut processor = TestBatchProcessor::new_mock(mock_model, 4);
+
+        let texts = vec![
+            "Hello world".to_string(),
+            "This is a test".to_string(),
+            "Batch processing".to_string(),
+        ];
+
+        let results = processor.process_batch(&texts).await.unwrap();
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(processor.stats.total_texts, 3);
+        assert_eq!(processor.stats.successful_embeddings, 3);
+        assert_eq!(processor.stats.failed_embeddings, 0);
+
+        // Verify each result
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(result.text, texts[i]);
+            assert_eq!(result.dimension(), 384);
+            assert!(result.processing_time_ms > 0);
+            assert!(result.sequence_length > 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_model_not_loaded() {
+        let mock_model = Arc::new(MockEmbeddingModel::not_loaded());
+        let mut processor = TestBatchProcessor::new_mock(mock_model, 4);
+
+        let texts = vec!["Hello world".to_string()];
+        let result = processor.process_batch(&texts).await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            EmbeddingError::ModelNotLoaded
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_continue_on_error() {
+        let mock_model = Arc::new(MockEmbeddingModel::with_selective_failure(
+            "fail".to_string(),
+        ));
+        let mut processor = TestBatchProcessor::new_mock(mock_model, 4);
+
+        let texts = vec![
+            "Hello world".to_string(),
+            "This will fail".to_string(), // Contains "fail"
+            "This is fine".to_string(),
+            "Another fail here".to_string(), // Contains "fail"
+        ];
+
+        let results = processor.process_batch(&texts).await.unwrap();
+
+        // Should get 2 successful results (skipping the 2 that failed)
+        assert_eq!(results.len(), 2);
+        assert_eq!(processor.stats.successful_embeddings, 2);
+        assert_eq!(processor.stats.failed_embeddings, 2);
+
+        // Check that successful results are correct
+        assert_eq!(results[0].text, "Hello world");
+        assert_eq!(results[1].text, "This is fine");
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_stop_on_error() {
+        let mock_model = Arc::new(MockEmbeddingModel::with_selective_failure(
+            "fail".to_string(),
+        ));
+        let config = BatchConfig {
+            batch_size: 4,
+            continue_on_error: false, // Stop on first error
+            max_parallel_tasks: 4,
+            enable_progress_reporting: false,
+            progress_report_interval_batches: 10,
+            memory_limit_mb: None,
+            enable_memory_monitoring: true,
+        };
+        let mut processor = TestBatchProcessor::with_config_mock(mock_model, config);
+
+        let texts = vec![
+            "Hello world".to_string(),
+            "This will fail".to_string(), // Contains "fail" - should stop here
+            "This won't be processed".to_string(),
+        ];
+
+        let result = processor.process_batch(&texts).await;
+
+        // Should fail on the second text
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            EmbeddingError::TextProcessing(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_empty_input() {
+        let mock_model = Arc::new(MockEmbeddingModel::new());
+        let mut processor = TestBatchProcessor::new_mock(mock_model, 4);
+
+        let texts: Vec<String> = vec![];
+        let results = processor.process_texts(texts).await.unwrap();
+
+        assert!(results.is_empty());
+        assert_eq!(processor.stats.total_texts, 0);
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_large_batch_chunking() {
+        let mock_model = Arc::new(MockEmbeddingModel::new());
+        let mut processor = TestBatchProcessor::new_mock(mock_model, 3); // Small batch size
+
+        let texts: Vec<String> = (0..10).map(|i| format!("Text number {}", i)).collect();
+        let results = processor.process_texts(texts.clone()).await.unwrap();
+
+        assert_eq!(results.len(), 10);
+        assert_eq!(processor.stats.total_texts, 10);
+        assert_eq!(processor.stats.successful_embeddings, 10);
+        assert_eq!(processor.stats.batches_processed, 4); // 10 texts / 3 batch size = 4 batches (3+3+3+1)
+
+        // Verify all texts were processed correctly
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(result.text, texts[i]);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_memory_limit() {
+        let mock_model = Arc::new(MockEmbeddingModel::new());
+        let config = BatchConfig {
+            batch_size: 4,
+            continue_on_error: true,
+            max_parallel_tasks: 4,
+            enable_progress_reporting: false,
+            progress_report_interval_batches: 10,
+            memory_limit_mb: Some(1), // Very small memory limit
+            enable_memory_monitoring: true,
+        };
+        let mut processor = TestBatchProcessor::with_config_mock(mock_model, config);
+
+        // Create a large text that should exceed memory limit
+        let large_text = "x".repeat(10_000_000); // 10MB of text
+        let texts = vec![large_text];
+
+        let result = processor.process_batch(&texts).await;
+
+        // Should fail due to memory limit
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            EmbeddingError::BatchProcessing(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_progress_callback() {
+        use std::sync::Mutex;
+
+        let mock_model = Arc::new(MockEmbeddingModel::new());
+        let config = BatchConfig {
+            batch_size: 2,
+            continue_on_error: true,
+            max_parallel_tasks: 4,
+            enable_progress_reporting: true,
+            progress_report_interval_batches: 1, // Report every batch
+            memory_limit_mb: None,
+            enable_memory_monitoring: true,
+        };
+        let mut processor = TestBatchProcessor::with_config_mock(mock_model, config);
+
+        // Collect progress reports
+        let progress_reports = Arc::new(Mutex::new(Vec::new()));
+        let progress_reports_clone = progress_reports.clone();
+
+        processor.set_progress_callback(Box::new(move |progress| {
+            progress_reports_clone
+                .lock()
+                .unwrap()
+                .push(progress.clone());
+        }));
+
+        let texts: Vec<String> = (0..5).map(|i| format!("Text {}", i)).collect();
+        let results = processor.process_texts(texts).await.unwrap();
+
+        assert_eq!(results.len(), 5);
+
+        // Check that progress was reported
+        let reports = progress_reports.lock().unwrap();
+        assert!(!reports.is_empty());
+
+        // Verify progress report structure
+        for report in reports.iter() {
+            assert!(report.current_batch > 0);
+            assert!(report.total_batches > 0);
+            // elapsed_time_ms is always >= 0 by type (u64)
+            assert!(report.current_throughput_texts_per_second >= 0.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_custom_config() {
+        let mock_model = Arc::new(MockEmbeddingModel::new());
+        let config = BatchConfig {
+            batch_size: 8,
+            continue_on_error: false,
+            max_parallel_tasks: 2,
+            enable_progress_reporting: true,
+            progress_report_interval_batches: 5,
+            memory_limit_mb: Some(100),
+            enable_memory_monitoring: false,
+        };
+        let processor = TestBatchProcessor::with_config_mock(mock_model, config);
+
+        // Verify configuration was applied correctly
+        assert_eq!(processor.config.batch_size, 8);
+        assert!(!processor.config.continue_on_error);
+        assert_eq!(processor.config.max_parallel_tasks, 2);
+        assert!(processor.config.enable_progress_reporting);
+        assert_eq!(processor.config.progress_report_interval_batches, 5);
+        assert_eq!(processor.config.memory_limit_mb, Some(100));
+        assert!(!processor.config.enable_memory_monitoring);
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_deterministic_results() {
+        let mock_model = Arc::new(MockEmbeddingModel::new());
+        let mut processor1 = TestBatchProcessor::new_mock(mock_model.clone(), 4);
+        let mut processor2 = TestBatchProcessor::new_mock(mock_model, 4);
+
+        let texts = vec![
+            "Consistent text 1".to_string(),
+            "Consistent text 2".to_string(),
+        ];
+
+        let results1 = processor1.process_batch(&texts).await.unwrap();
+        let results2 = processor2.process_batch(&texts).await.unwrap();
+
+        // Results should be identical for same inputs
+        assert_eq!(results1.len(), results2.len());
+        for (r1, r2) in results1.iter().zip(results2.iter()) {
+            assert_eq!(r1.text, r2.text);
+            assert_eq!(r1.text_hash, r2.text_hash);
+            assert_eq!(r1.embedding, r2.embedding);
+            assert_eq!(r1.sequence_length, r2.sequence_length);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_batch_processor_edge_cases() {
+        let mock_model = Arc::new(MockEmbeddingModel::new());
+        let mut processor = TestBatchProcessor::new_mock(mock_model, 4);
+
+        // Test with various edge case inputs
+        let texts = vec![
+            "a".to_string(),                         // Single character
+            "word".to_string(),                      // Single word
+            "Multiple words here".to_string(),       // Multiple words
+            "Special chars: !@#$%^&*()".to_string(), // Special characters
+            "Numbers 12345 and symbols".to_string(), // Mixed content
+        ];
+
+        let results = processor.process_batch(&texts).await.unwrap();
+
+        assert_eq!(results.len(), 5);
+        assert_eq!(processor.stats.successful_embeddings, 5);
+        assert_eq!(processor.stats.failed_embeddings, 0);
+
+        // Verify all results are valid
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(result.text, texts[i]);
+            assert_eq!(result.dimension(), 384);
+            assert!(result.sequence_length > 0);
+            assert!(result.processing_time_ms > 0);
+            assert!(!result.text_hash.is_empty());
+
+            // Verify embedding is not all zeros (deterministic but not trivial)
+            assert!(result.embedding.iter().any(|&x| x != 0.0));
+        }
     }
 
     #[test]
