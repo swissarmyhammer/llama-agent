@@ -1,7 +1,8 @@
 use clap::Args;
+use llama_loader::ModelSource;
 use std::path::PathBuf;
 
-#[derive(Args, Clone)]
+#[derive(Args, Clone, Debug)]
 #[command(about = "Generate embeddings for input texts")]
 pub struct EmbedArgs {
     /// Model source (HuggingFace repo or local path)
@@ -37,47 +38,176 @@ pub struct EmbedArgs {
     pub debug: bool,
 }
 
-// Placeholder validation function for EmbedArgs
+/// Comprehensive validation function for EmbedArgs
 pub fn validate_embed_args(args: &EmbedArgs) -> anyhow::Result<()> {
-    // Validate model path
-    if args.model.is_empty() {
-        return Err(anyhow::anyhow!("Model path cannot be empty"));
-    }
+    // 1. Validate model using ModelSource validation
+    validate_model_source(&args.model, &args.filename)?;
 
-    // Validate input file exists
-    if !args.input.exists() {
+    // 2. Validate input file
+    validate_input_file(&args.input)?;
+
+    // 3. Validate output path  
+    validate_output_path(&args.output)?;
+
+    // 4. Validate parameters
+    validate_parameters(args.batch_size, args.max_length)?;
+
+    Ok(())
+}
+
+/// Validate model source using ModelSource validation from llama-loader
+fn validate_model_source(model: &str, filename: &Option<String>) -> anyhow::Result<()> {
+    if model.is_empty() {
         return Err(anyhow::anyhow!(
-            "Input file does not exist: {}",
-            args.input.display()
+            "Model path cannot be empty\n💡 Provide either a HuggingFace repo (e.g., 'microsoft/DialoGPT-medium') or local path"
         ));
     }
 
-    // Validate batch size
-    if args.batch_size == 0 {
-        return Err(anyhow::anyhow!("Batch size must be greater than 0"));
+    // Create ModelSource based on CLI logic from to_embedding_config
+    let model_source = if model.contains('/') && !std::path::Path::new(model).exists() {
+        // Looks like HuggingFace repo
+        ModelSource::HuggingFace {
+            repo: model.to_string(),
+            filename: filename.clone(),
+        }
+    } else {
+        // Local path
+        ModelSource::Local {
+            folder: std::path::PathBuf::from(model),
+            filename: filename.clone(),
+        }
+    };
+
+    // Use ModelSource validation with better error handling
+    model_source.validate().map_err(|e| {
+        anyhow::anyhow!(
+            "Model validation failed: {}\n💡 For local models: ensure path exists and contains .gguf files\n💡 For HuggingFace: use format 'org/repo' and verify repo exists",
+            e
+        )
+    })
+}
+
+/// Validate input file exists, is readable, and contains data
+fn validate_input_file(input: &std::path::Path) -> anyhow::Result<()> {
+    if !input.exists() {
+        return Err(anyhow::anyhow!(
+            "Input file does not exist: {}\n💡 Ensure file path is correct and file exists",
+            input.display()
+        ));
+    }
+
+    if !input.is_file() {
+        return Err(anyhow::anyhow!(
+            "Input path is not a file: {}\n💡 Provide path to a text file, not a directory",
+            input.display()
+        ));
+    }
+
+    // Check if file is readable
+    let metadata = std::fs::metadata(input).map_err(|e| {
+        anyhow::anyhow!(
+            "Cannot read input file metadata: {}: {}\n💡 Check file permissions and ensure file is accessible",
+            input.display(),
+            e
+        )
+    })?;
+
+    if metadata.len() == 0 {
+        return Err(anyhow::anyhow!(
+            "Input file is empty: {}\n💡 Provide a text file with content (one text per line)",
+            input.display()
+        ));
+    }
+
+    // Test file readability by trying to open it
+    std::fs::File::open(input).map_err(|e| {
+        anyhow::anyhow!(
+            "Cannot open input file: {}: {}\n💡 Check file permissions and ensure file is readable",
+            input.display(),
+            e
+        )
+    })?;
+
+    Ok(())
+}
+
+/// Validate output path and ensure directory is writable
+fn validate_output_path(output: &std::path::Path) -> anyhow::Result<()> {
+    // Validate output file extension
+    if let Some(extension) = output.extension() {
+        if extension != "parquet" {
+            return Err(anyhow::anyhow!(
+                "Output file must have .parquet extension, got: {}\n💡 Use a .parquet extension for the output file",
+                output.display()
+            ));
+        }
+    } else {
+        return Err(anyhow::anyhow!(
+            "Output file must have .parquet extension: {}\n💡 Add .parquet extension to the output filename",
+            output.display()
+        ));
     }
 
     // Ensure output directory exists, creating it if necessary
-    if let Some(parent) = args.output.parent() {
+    if let Some(parent) = output.parent() {
         if !parent.exists() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 anyhow::anyhow!(
-                    "Failed to create output directory '{}': {}",
+                    "Failed to create output directory '{}': {}\n💡 Check parent directory permissions and disk space",
                     parent.display(),
                     e
                 )
             })?;
         }
+
+        // Test write permissions by attempting to create a temporary file
+        let temp_file = parent.join(".embed_test_write");
+        if let Err(e) = std::fs::File::create(&temp_file) {
+            return Err(anyhow::anyhow!(
+                "Cannot write to output directory '{}': {}\n💡 Check directory permissions and disk space",
+                parent.display(),
+                e
+            ));
+        }
+        // Clean up test file
+        let _ = std::fs::remove_file(temp_file);
+    }
+
+    Ok(())
+}
+
+/// Validate embedding parameters
+fn validate_parameters(batch_size: usize, max_length: Option<usize>) -> anyhow::Result<()> {
+    // Validate batch size
+    if batch_size == 0 {
+        return Err(anyhow::anyhow!(
+            "Batch size must be greater than 0\n💡 Use a reasonable batch size like 32 or 64"
+        ));
+    }
+
+    if batch_size > 1024 {
+        return Err(anyhow::anyhow!(
+            "Batch size is too large: {}. Maximum recommended is 1024\n💡 Large batch sizes may cause memory issues",
+            batch_size
+        ));
     }
 
     // Validate max_length if specified
-    if let Some(max_length) = args.max_length {
+    if let Some(max_length) = max_length {
         if max_length == 0 {
-            return Err(anyhow::anyhow!("Max length must be greater than 0"));
+            return Err(anyhow::anyhow!(
+                "Max length must be greater than 0\n💡 Use a reasonable sequence length like 512"
+            ));
         }
         if max_length > 8192 {
             return Err(anyhow::anyhow!(
-                "Max length is too large: {}. Maximum recommended is 8192",
+                "Max length is too large: {}. Maximum recommended is 8192\n💡 Very long sequences may cause memory issues and slow processing",
+                max_length
+            ));
+        }
+        if max_length < 32 {
+            return Err(anyhow::anyhow!(
+                "Max length is too small: {}. Minimum recommended is 32\n💡 Very short sequences may not capture meaningful semantics",
                 max_length
             ));
         }
@@ -89,7 +219,6 @@ pub fn validate_embed_args(args: &EmbedArgs) -> anyhow::Result<()> {
 use crate::parquet_writer::ParquetWriter;
 use indicatif::{ProgressBar, ProgressStyle};
 use llama_embedding::{BatchProcessor, EmbeddingConfig, EmbeddingModel};
-use llama_loader::ModelSource;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::info;
@@ -278,4 +407,291 @@ async fn count_non_empty_lines(input_path: &std::path::Path) -> anyhow::Result<u
 /// Legacy function name for compatibility
 pub async fn run_embed(args: EmbedArgs) -> anyhow::Result<()> {
     run_embed_command(args).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::{tempdir, NamedTempFile};
+
+    /// Create a valid EmbedArgs for testing
+    fn create_valid_embed_args() -> anyhow::Result<(EmbedArgs, tempfile::TempDir)> {
+        let temp_dir = tempdir()?;
+
+        // Create a test input file
+        let input_file = temp_dir.path().join("input.txt");
+        fs::write(&input_file, "Hello world\nTest content\n")?;
+
+        let args = EmbedArgs {
+            model: "microsoft/DialoGPT-medium".to_string(),
+            filename: None,
+            input: input_file,
+            output: temp_dir.path().join("output.parquet"),
+            batch_size: 32,
+            normalize: false,
+            max_length: Some(512),
+            debug: false,
+        };
+
+        Ok((args, temp_dir))
+    }
+
+    #[test]
+    fn test_validate_embed_args_valid() {
+        let (args, _temp_dir) = create_valid_embed_args().expect("Failed to create test args");
+        let result = validate_embed_args(&args);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_model_source_empty() {
+        let result = validate_model_source("", &None);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Model path cannot be empty"));
+    }
+
+    #[test]
+    fn test_validate_model_source_invalid_huggingface() {
+        let result = validate_model_source("invalid-repo", &None);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Model validation failed"));
+    }
+
+    #[test]
+    fn test_validate_model_source_valid_huggingface() {
+        let result = validate_model_source("microsoft/DialoGPT-medium", &None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_model_source_nonexistent_local() {
+        // Use a path without '/' so it's treated as local, not HuggingFace
+        let result = validate_model_source("nonexistent_local_model", &None);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Model validation failed"));
+    }
+
+    #[test]
+    fn test_validate_model_source_valid_local() -> anyhow::Result<()> {
+        let temp_dir = tempdir()?;
+        let result = validate_model_source(temp_dir.path().to_str().unwrap(), &None);
+        assert!(result.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_input_file_nonexistent() {
+        let nonexistent_path = PathBuf::from("/nonexistent/file.txt");
+        let result = validate_input_file(&nonexistent_path);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Input file does not exist"));
+    }
+
+    #[test]
+    fn test_validate_input_file_directory() -> anyhow::Result<()> {
+        let temp_dir = tempdir()?;
+        let result = validate_input_file(temp_dir.path());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Input path is not a file"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_input_file_empty() -> anyhow::Result<()> {
+        let temp_file = NamedTempFile::new()?;
+        let result = validate_input_file(temp_file.path());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Input file is empty"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_input_file_valid() -> anyhow::Result<()> {
+        let temp_file = NamedTempFile::new()?;
+        fs::write(temp_file.path(), "Hello world\nTest content\n")?;
+        let result = validate_input_file(temp_file.path());
+        assert!(result.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_output_path_no_extension() {
+        let output_path = PathBuf::from("/tmp/output");
+        let result = validate_output_path(&output_path);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must have .parquet extension"));
+    }
+
+    #[test]
+    fn test_validate_output_path_wrong_extension() {
+        let output_path = PathBuf::from("/tmp/output.txt");
+        let result = validate_output_path(&output_path);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must have .parquet extension"));
+    }
+
+    #[test]
+    fn test_validate_output_path_valid() -> anyhow::Result<()> {
+        let temp_dir = tempdir()?;
+        let output_path = temp_dir.path().join("output.parquet");
+        let result = validate_output_path(&output_path);
+        assert!(result.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_parameters_zero_batch_size() {
+        let result = validate_parameters(0, None);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Batch size must be greater than 0"));
+    }
+
+    #[test]
+    fn test_validate_parameters_large_batch_size() {
+        let result = validate_parameters(2048, None);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Batch size is too large"));
+    }
+
+    #[test]
+    fn test_validate_parameters_zero_max_length() {
+        let result = validate_parameters(32, Some(0));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Max length must be greater than 0"));
+    }
+
+    #[test]
+    fn test_validate_parameters_large_max_length() {
+        let result = validate_parameters(32, Some(10000));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Max length is too large"));
+    }
+
+    #[test]
+    fn test_validate_parameters_small_max_length() {
+        let result = validate_parameters(32, Some(16));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Max length is too small"));
+    }
+
+    #[test]
+    fn test_validate_parameters_valid() {
+        let result = validate_parameters(32, Some(512));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_parameters_valid_no_max_length() {
+        let result = validate_parameters(64, None);
+        assert!(result.is_ok());
+    }
+
+    /// Integration test with all validation components
+    #[test]
+    fn test_validate_embed_args_comprehensive() -> anyhow::Result<()> {
+        let temp_dir = tempdir()?;
+
+        // Create test input file
+        let input_file = temp_dir.path().join("input.txt");
+        fs::write(&input_file, "Hello world\nTest content\nMore text\n")?;
+
+        // Test with various configurations
+        let test_cases = vec![
+            // Valid HuggingFace model
+            EmbedArgs {
+                model: "microsoft/DialoGPT-medium".to_string(),
+                filename: None,
+                input: input_file.clone(),
+                output: temp_dir.path().join("output1.parquet"),
+                batch_size: 32,
+                normalize: false,
+                max_length: Some(512),
+                debug: false,
+            },
+            // Valid local model (using temp dir as placeholder)
+            EmbedArgs {
+                model: temp_dir.path().to_string_lossy().to_string(),
+                filename: None,
+                input: input_file.clone(),
+                output: temp_dir.path().join("output2.parquet"),
+                batch_size: 64,
+                normalize: true,
+                max_length: None,
+                debug: true,
+            },
+        ];
+
+        for args in test_cases {
+            let result = validate_embed_args(&args);
+            assert!(result.is_ok(), "Validation failed for args: {:?}", args);
+        }
+
+        Ok(())
+    }
+
+    /// Test error message quality and actionable suggestions
+    #[test]
+    fn test_error_messages_contain_suggestions() {
+        // Test empty model
+        let result = validate_model_source("", &None);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("💡"));
+        assert!(error_msg.contains("HuggingFace repo"));
+
+        // Test wrong output extension
+        let output_path = PathBuf::from("/tmp/output.txt");
+        let result = validate_output_path(&output_path);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("💡"));
+        assert!(error_msg.contains(".parquet"));
+
+        // Test zero batch size
+        let result = validate_parameters(0, None);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("💡"));
+        assert!(error_msg.contains("reasonable batch size"));
+    }
 }
